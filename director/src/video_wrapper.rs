@@ -1,0 +1,48 @@
+// Conditional re-export or mock of video-rs types
+#[cfg(feature = "video-rs")]
+pub use video_rs::{Decoder, Encoder, EncoderSettings, Locator, Time, Frame};
+
+#[cfg(not(feature = "video-rs"))]
+pub mod mock {
+    use std::path::Path;
+    use anyhow::Result;
+    use ndarray::Array3;
+
+    #[derive(Debug)]
+    pub struct Decoder;
+    impl Decoder {
+        pub fn new(_path: &Path) -> Result<Self, String> { Ok(Self) }
+    }
+
+    pub struct Encoder;
+    impl Encoder {
+        pub fn new(_dest: &Locator, _settings: EncoderSettings) -> Result<Self> { Ok(Self) }
+        pub fn finish(self) -> Result<()> { Ok(()) }
+
+        pub fn encode(&mut self, _frame: &Array3<u8>, _time: &Time) -> Result<()> {
+            // Mock encode
+            // We can print something to verify frame loop
+            Ok(())
+        }
+    }
+
+    pub struct Locator;
+    impl From<std::path::PathBuf> for Locator {
+        fn from(_: std::path::PathBuf) -> Self { Self }
+    }
+
+    pub struct EncoderSettings;
+    impl EncoderSettings {
+        pub fn for_h264_yuv420p(_w: usize, _h: usize, _b: bool) -> Self { Self }
+    }
+
+    pub struct Time;
+    impl Time {
+        pub fn from_nth_of_second(_n: usize, _fps: u32) -> Self { Self }
+    }
+
+    pub struct Frame;
+}
+
+#[cfg(not(feature = "video-rs"))]
+pub use mock::*;
