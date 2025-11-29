@@ -12,6 +12,10 @@ pub mod mock {
     pub struct Decoder;
     impl Decoder {
         pub fn new(_path: &Path) -> Result<Self, String> { Ok(Self) }
+        // Mock decode: returns time and frame (RGB)
+        pub fn decode(&mut self, _time: &Time) -> Result<(Time, Array3<u8>), anyhow::Error> {
+             Ok((Time, Array3::zeros((10, 10, 3))))
+        }
     }
 
     pub struct Encoder;
@@ -20,8 +24,6 @@ pub mod mock {
         pub fn finish(self) -> Result<()> { Ok(()) }
 
         pub fn encode(&mut self, _frame: &Array3<u8>, _time: &Time) -> Result<()> {
-            // Mock encode
-            // We can print something to verify frame loop
             Ok(())
         }
     }
@@ -36,9 +38,11 @@ pub mod mock {
         pub fn for_h264_yuv420p(_w: usize, _h: usize, _b: bool) -> Self { Self }
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq)]
     pub struct Time;
     impl Time {
         pub fn from_nth_of_second(_n: usize, _fps: u32) -> Self { Self }
+        pub fn from_secs(_s: f64) -> Self { Self }
     }
 
     pub struct Frame;

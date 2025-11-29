@@ -388,6 +388,7 @@ dependencies = [
  "image",
  "keyframe",
  "ndarray",
+ "rayon",
  "rhai",
  "skia-safe",
  "taffy",
