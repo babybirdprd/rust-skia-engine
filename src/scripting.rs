@@ -1,11 +1,13 @@
-use rhai::Engine;
-use crate::director::{Director, NodeId};
-use crate::node::{BoxNode, TextNode, Color};
+use rhai::{Engine, Map};
+use crate::director::{Director, NodeId, TimelineItem, PathAnimationState};
+use crate::node::{BoxNode, TextNode};
+use crate::element::{Color, TextSpan};
+use crate::animation::{Animated, EasingType};
 use std::sync::{Arc, Mutex};
 use cosmic_text::{FontSystem, SwashCache};
+use skia_safe::Path;
 
 /// Wrapper around `Director` for Rhai scripting.
-/// Allows sharing the Director instance safely across script calls.
 #[derive(Clone)]
 pub struct MovieHandle {
     pub director: Arc<Mutex<Director>>,
@@ -21,7 +23,6 @@ pub struct SceneHandle {
 }
 
 /// Handle to a specific Node in the scene graph.
-/// Used to chain method calls like `.animate()` in Rhai.
 #[derive(Clone)]
 pub struct NodeHandle {
     pub director: Arc<Mutex<Director>>,
@@ -42,7 +43,6 @@ fn parse_hex_color(hex: &str) -> Option<Color> {
             let r = u8::from_str_radix(&hex[0..1], 16).ok()?;
             let g = u8::from_str_radix(&hex[1..2], 16).ok()?;
             let b = u8::from_str_radix(&hex[2..3], 16).ok()?;
-            // Expand 0xF -> 0xFF
             (r * 17, g * 17, b * 17)
         },
         _ => return None,
@@ -56,20 +56,6 @@ fn parse_hex_color(hex: &str) -> Option<Color> {
     ))
 }
 
-/// Registers the Director DSL into the Rhai engine.
-///
-/// # Supported Types
-/// * `Movie`
-/// * `Scene`
-/// * `Node`
-///
-/// # Supported Functions
-/// * `new_director(w, h, fps)`
-/// * `movie.add_scene(duration)`
-/// * `scene.add_box(props)`
-/// * `box.add_text(props)`
-/// * `node.animate(prop, target, duration, easing)`
-/// * `node.set_blur(radius)`
 pub fn register_rhai_api(engine: &mut Engine) {
     // 1. Director/Movie
     engine.register_type_with_name::<MovieHandle>("Movie");
@@ -88,17 +74,30 @@ pub fn register_rhai_api(engine: &mut Engine) {
     engine.register_type_with_name::<SceneHandle>("Scene");
     engine.register_fn("add_scene", |movie: &mut MovieHandle, duration: f64| {
         let mut d = movie.director.lock().unwrap();
+        let start_time = d.timeline.last().map(|i| i.start_time + i.duration).unwrap_or(0.0);
+<<<<<<< HEAD
+
         let root = BoxNode::new();
         let id = d.add_node(Box::new(root));
 
-        if d.root_id.is_none() {
-            d.root_id = Some(id);
-        }
+=======
+
+        let root = BoxNode::new();
+        let id = d.add_node(Box::new(root));
+
+>>>>>>> d1f706e (Apply patch /tmp/d75507de-5e68-4ed1-938f-a41d1f20d671.patch)
+        let item = TimelineItem {
+            scene_root: id,
+            start_time,
+            duration,
+            z_index: 0,
+        };
+        d.timeline.push(item);
 
         SceneHandle {
             director: movie.director.clone(),
             root_id: id,
-            start_time: 0.0,
+            start_time,
             duration,
         }
     });
@@ -106,7 +105,6 @@ pub fn register_rhai_api(engine: &mut Engine) {
     // 3. Elements
     engine.register_type_with_name::<NodeHandle>("Node");
 
-    // box = scene.add_box(...)
     engine.register_fn("add_box", |scene: &mut SceneHandle, props: rhai::Map| {
         let mut d = scene.director.lock().unwrap();
         let mut box_node = BoxNode::new();
@@ -118,9 +116,7 @@ pub fn register_rhai_api(engine: &mut Engine) {
                  }
              }
         }
-
-        // Shadows
-        if let Some(c) = props.get("shadow_color") {
+         if let Some(c) = props.get("shadow_color") {
              if let Ok(s) = c.clone().into_string() {
                  if let Some(color) = parse_hex_color(&s) {
                      box_node.shadow_color = Some(crate::animation::Animated::new(color));
@@ -143,13 +139,47 @@ pub fn register_rhai_api(engine: &mut Engine) {
         NodeHandle { director: scene.director.clone(), id }
     });
 
-    // text = box.add_text(...)
     engine.register_fn("add_text", |parent: &mut NodeHandle, props: rhai::Map| {
          let fs = Arc::new(Mutex::new(FontSystem::new()));
          let sc = Arc::new(Mutex::new(SwashCache::new()));
 
-         let content = props.get("content").unwrap().to_string();
-         let text_node = TextNode::new(content, fs, sc);
+         let mut spans = Vec::new();
+<<<<<<< HEAD
+
+=======
+
+>>>>>>> d1f706e (Apply patch /tmp/d75507de-5e68-4ed1-938f-a41d1f20d671.patch)
+         if let Some(content_array) = props.get("content").and_then(|v| v.clone().into_array().ok()) {
+             for item in content_array {
+                 if let Some(map) = item.clone().try_cast::<Map>() {
+                     let text = map.get("text").map(|v| v.to_string()).unwrap_or_default();
+                     let mut span = TextSpan {
+                         text,
+                         color: None,
+                         font_family: None,
+                         font_weight: None,
+                         font_style: None,
+                         font_size: None,
+                     };
+                     if let Some(c) = map.get("color").and_then(|v| v.clone().into_string().ok()) {
+                         span.color = parse_hex_color(&c);
+                     }
+                     if let Some(w_str) = map.get("weight").and_then(|v| v.clone().into_string().ok()) {
+                         if w_str == "bold" { span.font_weight = Some(700); }
+                     }
+                     if let Some(s) = map.get("size").and_then(|v| v.as_float().ok()) {
+                         span.font_size = Some(s as f32);
+                     }
+                     spans.push(span);
+                 } else if let Ok(s) = item.into_string() {
+                     spans.push(TextSpan { text: s, color: None, font_family: None, font_weight: None, font_style: None, font_size: None });
+                 }
+             }
+         } else if let Some(s) = props.get("content").map(|v| v.to_string()) {
+             spans.push(TextSpan { text: s, color: None, font_family: None, font_weight: None, font_style: None, font_size: None });
+         }
+
+         let text_node = TextNode::new(spans, fs, sc);
 
          let mut d = parent.director.lock().unwrap();
          let id = d.add_node(Box::new(text_node));
@@ -158,25 +188,140 @@ pub fn register_rhai_api(engine: &mut Engine) {
          NodeHandle { director: parent.director.clone(), id }
     });
 
-    // 4. Animation & Properties
+    engine.register_fn("set_content", |node: &mut NodeHandle, content: rhai::Dynamic| {
+         let mut spans = Vec::new();
+         if let Ok(arr) = content.clone().into_array() {
+              for item in arr {
+                  if let Some(map) = item.clone().try_cast::<Map>() {
+                     let text = map.get("text").map(|v| v.to_string()).unwrap_or_default();
+                     let mut span = TextSpan {
+                         text,
+                         color: None,
+                         font_family: None,
+                         font_weight: None,
+                         font_style: None,
+                         font_size: None,
+                     };
+                     if let Some(c) = map.get("color").and_then(|v| v.clone().into_string().ok()) {
+                         span.color = parse_hex_color(&c);
+                     }
+                     if let Some(w_str) = map.get("weight").and_then(|v| v.clone().into_string().ok()) {
+                         if w_str == "bold" { span.font_weight = Some(700); }
+                     }
+                     if let Some(s) = map.get("size").and_then(|v| v.as_float().ok()) {
+                         span.font_size = Some(s as f32);
+                     }
+                     spans.push(span);
+                  }
+              }
+         }
+
+         let mut d = node.director.lock().unwrap();
+         if let Some(n) = d.get_node_mut(node.id) {
+             n.element.set_rich_text(spans);
+         }
+    });
+
+<<<<<<< HEAD
+    engine.register_fn("set_content", |node: &mut NodeHandle, content: rhai::Dynamic| {
+         let mut spans = Vec::new();
+         if let Ok(arr) = content.clone().into_array() {
+              for item in arr {
+                  if let Some(map) = item.clone().try_cast::<Map>() {
+                     let text = map.get("text").map(|v| v.to_string()).unwrap_or_default();
+                     let mut span = TextSpan {
+                         text,
+                         color: None,
+                         font_family: None,
+                         font_weight: None,
+                         font_style: None,
+                         font_size: None,
+                     };
+                     if let Some(c) = map.get("color").and_then(|v| v.clone().into_string().ok()) {
+                         span.color = parse_hex_color(&c);
+                     }
+                     if let Some(w_str) = map.get("weight").and_then(|v| v.clone().into_string().ok()) {
+                         if w_str == "bold" { span.font_weight = Some(700); }
+                     }
+                     if let Some(s) = map.get("size").and_then(|v| v.as_float().ok()) {
+                         span.font_size = Some(s as f32);
+                     }
+                     spans.push(span);
+                  }
+              }
+         }
+
+         let mut d = node.director.lock().unwrap();
+         if let Some(n) = d.get_node_mut(node.id) {
+             n.element.set_rich_text(spans);
+         }
+    });
+
+=======
+>>>>>>> d1f706e (Apply patch /tmp/d75507de-5e68-4ed1-938f-a41d1f20d671.patch)
     engine.register_fn("animate", |node: &mut NodeHandle, prop: &str, _start: f64, end: f64, dur: f64, ease: &str| {
         let mut d = node.director.lock().unwrap();
         if let Some(n) = d.get_node_mut(node.id) {
-             // start is unused in add_keyframe logic (uses current value or jumps),
-             // but effectively we might want to set start value if time is 0.
-             // For now we just animate to 'end'.
              n.element.animate_property(prop, end as f32, dur, ease);
         }
     });
 
-    // 5. Effects (Blur)
-    // node.set_blur(10.0) could be added or just via animate("blur")
+    engine.register_fn("path_animate", |node: &mut NodeHandle, svg: &str, dur: f64, ease: &str| {
+        let mut d = node.director.lock().unwrap();
+        if let Some(n) = d.get_node_mut(node.id) {
+             // Try to parse SVG path
+             if let Some(path) = Path::from_svg(svg) {
+                 let ease_fn = match ease {
+                     "linear" => EasingType::Linear,
+                     "ease_in" => EasingType::EaseIn,
+                     "ease_out" => EasingType::EaseOut,
+                     "ease_in_out" => EasingType::EaseInOut,
+                     _ => EasingType::Linear,
+                 };
+                 let mut progress = Animated::new(0.0);
+                 progress.add_keyframe(1.0, dur, ease_fn);
+
+                 n.path_animation = Some(PathAnimationState {
+                     path,
+                     progress
+                 });
+             } else {
+                 eprintln!("Failed to parse SVG path: {}", svg);
+             }
+        }
+    });
+
+<<<<<<< HEAD
+    engine.register_fn("path_animate", |node: &mut NodeHandle, svg: &str, dur: f64, ease: &str| {
+        let mut d = node.director.lock().unwrap();
+        if let Some(n) = d.get_node_mut(node.id) {
+             // Try to parse SVG path
+             if let Some(path) = Path::from_svg(svg) {
+                 let ease_fn = match ease {
+                     "linear" => EasingType::Linear,
+                     "ease_in" => EasingType::EaseIn,
+                     "ease_out" => EasingType::EaseOut,
+                     "ease_in_out" => EasingType::EaseInOut,
+                     _ => EasingType::Linear,
+                 };
+                 let mut progress = Animated::new(0.0);
+                 progress.add_keyframe(1.0, dur, ease_fn);
+
+                 n.path_animation = Some(PathAnimationState {
+                     path,
+                     progress
+                 });
+             } else {
+                 eprintln!("Failed to parse SVG path: {}", svg);
+             }
+        }
+    });
+
+=======
+>>>>>>> d1f706e (Apply patch /tmp/d75507de-5e68-4ed1-938f-a41d1f20d671.patch)
     engine.register_fn("set_blur", |node: &mut NodeHandle, val: f64| {
          let mut d = node.director.lock().unwrap();
          if let Some(n) = d.get_node_mut(node.id) {
-             // We need to jump the blur animation to this value
-             // This requires animate_property to handle immediate set or add a helper.
-             // We'll just animate it over 0s.
              n.element.animate_property("blur", val as f32, 0.0, "linear");
          }
     });
