@@ -1,12 +1,11 @@
-use skia_safe::{Canvas, Paint, Rect, Image, Color4f, Data, TextBlob};
+use skia_safe::{Canvas, Paint, Rect, Image, Color4f, Data, TextBlob, FontMgr, FontStyle, ColorType, AlphaType};
 use taffy::style::Style;
-use crate::element::Element;
+use crate::element::{Element, Color, TextSpan};
 use crate::animation::{Animated, EasingType};
-use cosmic_text::{Buffer, FontSystem, Metrics, SwashCache, Attrs, Shaping};
+use cosmic_text::{Buffer, FontSystem, Metrics, SwashCache, Attrs, AttrsList, Shaping, Weight, Style as CosmicStyle, Family};
 use std::sync::{Arc, Mutex};
-use std::cell::RefCell;
-// Video imports
 use crate::video_wrapper::{Decoder};
+use std::fmt;
 
 // Helper to parse easing
 fn parse_easing(e: &str) -> EasingType {
@@ -17,54 +16,6 @@ fn parse_easing(e: &str) -> EasingType {
         "ease_in_out" => EasingType::EaseInOut,
         "bounce_out" => EasingType::BounceOut,
         _ => EasingType::Linear,
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct Color {
-    pub r: f32,
-    pub g: f32,
-    pub b: f32,
-    pub a: f32,
-}
-
-impl Color {
-    pub const BLACK: Color = Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
-    pub const WHITE: Color = Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
-
-    pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
-        Self { r, g, b, a }
-    }
-
-    pub fn to_skia(&self) -> skia_safe::Color {
-        skia_safe::Color::from_argb(
-            (self.a * 255.0) as u8,
-            (self.r * 255.0) as u8,
-            (self.g * 255.0) as u8,
-            (self.b * 255.0) as u8,
-        )
-    }
-
-    pub fn to_color4f(&self) -> Color4f {
-        Color4f::new(self.r, self.g, self.b, self.a)
-    }
-}
-
-impl Default for Color {
-    fn default() -> Self {
-        Self::BLACK
-    }
-}
-
-impl keyframe::CanTween for Color {
-    fn ease(from: Self, to: Self, time: impl keyframe::num_traits::Float) -> Self {
-        let t = time.to_f64().unwrap() as f32;
-        Self {
-            r: from.r + (to.r - from.r) * t,
-            g: from.g + (to.g - from.g) * t,
-            b: from.b + (to.b - from.b) * t,
-            a: from.a + (to.a - from.a) * t,
-        }
     }
 }
 
@@ -125,19 +76,8 @@ impl Element for BoxNode {
         let mut paint = Paint::default();
         paint.set_anti_alias(true);
 
-        // Build Image Filters chain
-        // Logic: Input -> Blur -> Shadow
-        // Actually, Shadow should be applied to the shape.
-        // If we have Blur AND Shadow:
-        // Case A: The box is blurred, then casts a shadow.
-        // Case B: The box casts a shadow, and the box is blurred.
-        // Standard CSS `box-shadow` is roughly: Shadow is drawn behind, then Box is drawn on top.
-        // `image_filters::drop_shadow` draws BOTH.
-        // So `drop_shadow(blur(input))`.
-
         let mut current_filter = None;
 
-        // 1. Blur
         if self.blur.current_value > 0.0 {
             let sigma = self.blur.current_value;
             current_filter = skia_safe::image_filters::blur(
@@ -148,38 +88,19 @@ impl Element for BoxNode {
             );
         }
 
-        // 2. Drop Shadow
         if let Some(sc) = &self.shadow_color {
             let color = sc.current_value.to_skia();
             let sigma = self.shadow_blur.current_value;
             let dx = self.shadow_offset_x.current_value;
             let dy = self.shadow_offset_y.current_value;
 
-            // drop_shadow(delta, sigma, color, input, crop, crop_rect?)
-            // The error said `current_filter.as_ref()` failed trait bound `Into<Option<ColorSpace>>`.
-            // Wait, why ColorSpace?
-            // Because arg4 `input` expects `impl Into<Option<ImageFilter>>`.
-            // But if I messed up arguments, it might match wrong overload or type inference is confused.
-            // `drop_shadow` takes: (delta, sigmaX/Y, color, input, crop, crop_rect?)
-            // Let's look at `check_skia_api` error:
-            // "argument #6 is missing".
-            // So it takes 6 args.
-            // 1. delta: (f32, f32)
-            // 2. sigma: (f32, f32)
-            // 3. color: Color
-            // 4. input: Option<ImageFilter>
-            // 5. crop: Option<CropRect> ?
-            // 6. crop_rect: Option<Rect> ?
-
-            // Apply drop_shadow filter.
-            // Signature: (delta, sigma, color, color_space, input, crop)
             current_filter = skia_safe::image_filters::drop_shadow(
                 (dx, dy),
                 (sigma, sigma),
                 color,
-                None, // color_space
-                current_filter, // input
-                None // crop
+                None,
+                current_filter,
+                None
             );
         }
 
@@ -210,31 +131,29 @@ impl Element for BoxNode {
 
 // --- Text Node ---
 pub struct TextNode {
-    pub content: String,
-    pub font_family: String,
-    pub font_size: Animated<f32>,
-    pub color: Animated<Color>,
-    pub buffer: RefCell<Option<Buffer>>,
+    pub spans: Vec<TextSpan>,
+    pub default_font_size: Animated<f32>,
+    pub default_color: Animated<Color>,
+    pub buffer: Mutex<Option<Buffer>>,
     pub font_system: Arc<Mutex<FontSystem>>,
     pub swash_cache: Arc<Mutex<SwashCache>>,
 }
 
-impl std::fmt::Debug for TextNode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for TextNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TextNode")
-         .field("content", &self.content)
+         .field("spans", &self.spans)
          .finish()
     }
 }
 
 impl TextNode {
-    pub fn new(content: String, font_system: Arc<Mutex<FontSystem>>, swash_cache: Arc<Mutex<SwashCache>>) -> Self {
+    pub fn new(spans: Vec<TextSpan>, font_system: Arc<Mutex<FontSystem>>, swash_cache: Arc<Mutex<SwashCache>>) -> Self {
         let mut node = Self {
-            content,
-            font_family: "Sans Serif".into(),
-            font_size: Animated::new(20.0),
-            color: Animated::new(Color::WHITE),
-            buffer: RefCell::new(None),
+            spans,
+            default_font_size: Animated::new(20.0),
+            default_color: Animated::new(Color::WHITE),
+            buffer: Mutex::new(None),
             font_system: font_system.clone(),
             swash_cache,
         };
@@ -242,11 +161,51 @@ impl TextNode {
         node
     }
 
-    fn init_buffer(&mut self) {
+    pub fn init_buffer(&mut self) {
          let mut fs = self.font_system.lock().unwrap();
          let mut buffer = Buffer::new(&mut fs, Metrics::new(20.0, 24.0));
-         buffer.set_text(&mut fs, &self.content, &Attrs::new(), Shaping::Advanced, None);
-         *self.buffer.borrow_mut() = Some(buffer);
+
+         let mut full_text = String::new();
+         let mut attrs_list = AttrsList::new(&Attrs::new());
+
+         for span in &self.spans {
+             let start = full_text.len();
+             full_text.push_str(&span.text);
+             let end = full_text.len();
+
+             let mut attrs = Attrs::new();
+             if let Some(w) = span.font_weight {
+                 attrs = attrs.weight(Weight(w));
+             }
+             if let Some(s) = &span.font_style {
+                 if s == "italic" {
+                     attrs = attrs.style(CosmicStyle::Italic);
+                 }
+             }
+             if let Some(f) = &span.font_family {
+                 attrs = attrs.family(Family::Name(f));
+             }
+             if let Some(c) = &span.color {
+                 let cc = cosmic_text::Color::rgba(
+                     (c.r * 255.0) as u8,
+                     (c.g * 255.0) as u8,
+                     (c.b * 255.0) as u8,
+                     (c.a * 255.0) as u8,
+                 );
+                 attrs = attrs.color(cc);
+             }
+
+             attrs_list.add_span(start..end, &attrs);
+         }
+
+         let default_attrs = Attrs::new();
+         buffer.set_text(&mut fs, &full_text, &default_attrs, Shaping::Advanced, None);
+
+         if !buffer.lines.is_empty() {
+             buffer.lines[0].set_attrs_list(attrs_list);
+         }
+
+         *self.buffer.lock().unwrap() = Some(buffer);
     }
 }
 
@@ -256,65 +215,59 @@ impl Element for TextNode {
     }
 
     fn update(&mut self, time: f64) -> bool {
-        self.font_size.update(time);
-        self.color.update(time);
+        self.default_font_size.update(time);
+        self.default_color.update(time);
 
-        let size = self.font_size.current_value;
+        let size = self.default_font_size.current_value;
         let line_height = size * 1.2;
 
-        let mut buf_ref = self.buffer.borrow_mut();
-        if let Some(buffer) = buf_ref.as_mut() {
+        let mut buf_guard = self.buffer.lock().unwrap();
+        if let Some(buffer) = buf_guard.as_mut() {
             let mut fs = self.font_system.lock().unwrap();
             buffer.set_metrics(&mut fs, Metrics::new(size, line_height));
         }
         true
     }
 
-    fn render(&self, canvas: &Canvas, rect: Rect, opacity: f32) {
-        let mut buf_ref = self.buffer.borrow_mut();
-        if let Some(buffer) = buf_ref.as_mut() {
+    fn render(&self, canvas: &Canvas, rect: Rect, _opacity: f32) {
+        let mut buf_guard = self.buffer.lock().unwrap();
+        let _sc_guard = self.swash_cache.lock().unwrap();
+
+        if let Some(buffer) = buf_guard.as_mut() {
             let mut fs = self.font_system.lock().unwrap();
 
-            // Set size for wrapping
             buffer.set_size(&mut fs, Some(rect.width()), Some(rect.height()));
             buffer.shape_until_scroll(&mut fs, false);
 
-            // Draw Loop
-            let mut paint = Paint::default();
-            let mut c = self.color.current_value;
-            c.a *= opacity;
-            paint.set_color4f(c.to_color4f(), None);
+            let font_mgr = FontMgr::default();
 
-            // Text Fidelity Improvement: Match Font Family
-            let font_mgr = skia_safe::FontMgr::default();
-            let typeface = font_mgr.match_family_style(
-                self.font_family.as_str(),
-                skia_safe::FontStyle::normal()
-            ).unwrap_or_else(|| {
-                font_mgr.match_family_style("Sans Serif", skia_safe::FontStyle::normal())
-                        .expect("Failed to load default Typeface")
-            });
+             let typeface = font_mgr.match_family_style("Sans Serif", FontStyle::normal()).unwrap();
+             let font = skia_safe::Font::new(typeface, Some(self.default_font_size.current_value));
 
-            let font = skia_safe::Font::new(typeface, Some(self.font_size.current_value));
+             let mut paint = Paint::default();
+             paint.set_color4f(self.default_color.current_value.to_color4f(), None);
+             paint.set_anti_alias(true);
 
-            // Enable Anti-Aliasing for text
-            paint.set_anti_alias(true);
-
-            for run in buffer.layout_runs() {
+             for run in buffer.layout_runs() {
                  let origin_y = rect.top + run.line_y;
                  if let Some(blob) = TextBlob::from_str(run.text, &font) {
                       canvas.draw_text_blob(&blob, (rect.left, origin_y), &paint);
                  }
-            }
+             }
         }
     }
 
     fn animate_property(&mut self, property: &str, target: f32, duration: f64, easing: &str) {
         let ease_fn = parse_easing(easing);
         match property {
-            "font_size" | "size" => self.font_size.add_keyframe(target, duration, ease_fn),
+            "font_size" | "size" => self.default_font_size.add_keyframe(target, duration, ease_fn),
             _ => {}
         }
+    }
+
+    fn set_rich_text(&mut self, spans: Vec<TextSpan>) {
+        self.spans = spans;
+        self.init_buffer();
     }
 }
 
@@ -357,14 +310,10 @@ impl Element for ImageNode {
         paint.set_anti_alias(true);
 
         if let Some(img) = &self.image {
-             // High Quality Sampling (Trilinear: Linear Filter + Linear Mipmap)
              let sampling = skia_safe::SamplingOptions::new(
                  skia_safe::FilterMode::Linear,
                  skia_safe::MipmapMode::Linear
              );
-
-             // Use `draw_image_rect_with_sampling_options` which takes `impl Into<SamplingOptions>`.
-             // We pass `sampling` by value as it implements the trait (Copy/Clone).
              canvas.draw_image_rect_with_sampling_options(img, None, rect, sampling, &paint);
         }
     }
@@ -378,20 +327,34 @@ impl Element for ImageNode {
 }
 
 // --- Video Node ---
-#[derive(Debug)]
 pub struct VideoNode {
-    decoder: Option<Decoder>,
+    decoder: Mutex<Option<Decoder>>,
     pub opacity: Animated<f32>,
+    #[allow(dead_code)]
     source_path: String,
+
+    current_frame: Mutex<Option<(f64, Image)>>,
+    #[allow(dead_code)]
+    next_frame: Mutex<Option<(f64, Image)>>,
+}
+
+impl fmt::Debug for VideoNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VideoNode")
+         .field("opacity", &self.opacity)
+         .finish()
+    }
 }
 
 impl VideoNode {
     pub fn new(path: &str) -> Self {
         let decoder = Decoder::new(std::path::Path::new(path)).ok();
         Self {
-            decoder,
+            decoder: Mutex::new(decoder),
             opacity: Animated::new(1.0),
             source_path: path.to_string(),
+            current_frame: Mutex::new(None),
+            next_frame: Mutex::new(None),
         }
     }
 }
@@ -403,14 +366,57 @@ impl Element for VideoNode {
 
     fn update(&mut self, time: f64) -> bool {
         self.opacity.update(time);
+
+        let mut current = self.current_frame.lock().unwrap();
+        let mut decoder = self.decoder.lock().unwrap();
+
+        if let Some(dec) = decoder.as_mut() {
+            // Check cache
+            if let Some((t, _)) = current.as_ref() {
+                if (t - time).abs() < 0.001 {
+                    return true;
+                }
+            }
+
+            // Decode logic
+
+            if let Ok((_decoded_t, frame)) = dec.decode() {
+                 let shape = frame.shape();
+                 if shape.len() == 3 && shape[2] >= 3 {
+                     let h = shape[0];
+                     let w = shape[1];
+                     // Use into_raw_vec_and_offset?
+                     let bytes = frame.into_raw_vec();
+                     let data = Data::new_copy(&bytes);
+
+                     let info = skia_safe::ImageInfo::new(
+                         (w as i32, h as i32),
+                         ColorType::RGB888x,
+                         AlphaType::Opaque,
+                         None
+                     );
+
+                     if let Some(img) = skia_safe::images::raster_from_data(&info, data, w * 3) {
+                          *current = Some((time, img));
+                     }
+                 }
+            }
+        }
         true
     }
 
     fn render(&self, canvas: &Canvas, rect: Rect, parent_opacity: f32) {
          let op = self.opacity.current_value * parent_opacity;
-         let mut p = Paint::new(Color4f::new(0.0, 0.0, 1.0, 1.0), None);
-         p.set_alpha_f(op);
-         canvas.draw_rect(rect, &p);
+
+         let current = self.current_frame.lock().unwrap();
+         if let Some((_, img)) = current.as_ref() {
+             let paint = Paint::new(Color4f::new(1.0, 1.0, 1.0, op), None);
+             canvas.draw_image_rect(img, None, rect, &paint);
+         } else {
+             let mut p = Paint::new(Color4f::new(0.0, 0.0, 1.0, 1.0), None);
+             p.set_alpha_f(op);
+             canvas.draw_rect(rect, &p);
+         }
     }
 
     fn animate_property(&mut self, property: &str, target: f32, duration: f64, easing: &str) {

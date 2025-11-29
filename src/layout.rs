@@ -15,26 +15,36 @@ impl LayoutEngine {
         }
     }
 
-    pub fn compute_layout(&mut self, director: &mut Director) {
+    pub fn compute_layout(&mut self, director: &mut Director, time: f64) {
         // 1. Rebuild Taffy Tree from Director Scene Graph
         self.taffy = TaffyTree::new();
         self.node_map.clear();
 
-        // Assume root_id exists and is the entry point
-        if let Some(root_id) = director.root_id {
-            // Need to handle missing node safely
-            if let Some(node) = director.get_node(root_id) {
-                let root_style = node.element.layout_style();
-                // Force root size to match video dims
-                let mut style = root_style;
-                style.size = Size {
-                    width: length(director.width as f32),
-                    height: length(director.height as f32),
-                };
+        // Iterate timeline to find active roots
+        let mut active_roots = Vec::new();
+        for item in &director.timeline {
+             if time >= item.start_time && time < item.start_time + item.duration {
+                 active_roots.push(item.scene_root);
+             }
+        }
 
+        for root_id in active_roots {
+            // Need to handle missing node safely
+            if director.get_node(root_id).is_some() {
+                // Build tree for this scene
                 let taffy_root = self.build_recursive(director, root_id);
 
-                // 2. Compute
+                // 2. Compute Layout
+                // The root node of a scene fills the screen by default?
+                // Or we respect its style?
+                // Existing code forced root size.
+                // Let's force it for consistency.
+
+                // Note: We can't easily modify the style inside `director` from here without mutable borrow,
+                // but `build_recursive` reads style.
+                // Taffy allows overriding root size in `compute_layout`.
+                // We pass Definite size which acts as constraints.
+
                 self.taffy.compute_layout(
                     taffy_root,
                     Size {
