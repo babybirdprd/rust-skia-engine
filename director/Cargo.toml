@@ -29,3 +29,7 @@ mock_video = []
 [[bin]]
 name = "director-engine"
 path = "src/main.rs"
+
+[package.metadata.docs.rs]
+no-default-features = true
+features = ["mock_video"]
