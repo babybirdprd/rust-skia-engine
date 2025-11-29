@@ -32,7 +32,7 @@ fn main() {
         Ok(movie) => {
             println!("Script evaluated successfully. Starting render...");
             let mut director = movie.director.lock().unwrap();
-            match render_export(&mut director, PathBuf::from("output.mp4")) {
+            match render_export(&mut director, PathBuf::from("output.mp4"), None) {
                 Ok(_) => println!("Render complete: output.mp4"),
                 Err(e) => println!("Render failed: {}", e),
             }

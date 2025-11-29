@@ -1,6 +1,6 @@
 [package]
 name = "director-engine"
-version = "0.1.1"
+version = "1.0.0"
 edition = "2021"
 description = "A high-performance 2D rendering engine using Skia and Taffy"
 license = "MIT"
@@ -19,12 +19,14 @@ thiserror = "2.0.17"
 image = "0.25.9"
 
 # Optional dependencies
-video-rs = { version = "0.10.5", optional = true }
-ndarray = "0.17.1"
+video-rs = { version = "0.10.5", optional = true, features = ["ndarray"] }
+ndarray = "0.16"
+rayon = "1.10"
 
 [features]
 default = ["video-rs"]
 mock_video = []
+vulkan = ["skia-safe/vulkan"]
 
 [[bin]]
 name = "director-engine"
