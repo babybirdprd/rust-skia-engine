@@ -78,6 +78,12 @@ pub fn register_rhai_api(engine: &mut Engine) {
         MovieHandle { director: Arc::new(Mutex::new(director)) }
     });
 
+    engine.register_fn("configure_motion_blur", |movie: &mut MovieHandle, samples: i64, shutter_angle: f64| {
+         let mut d = movie.director.lock().unwrap();
+         d.samples_per_frame = samples as u32;
+         d.shutter_angle = shutter_angle as f32;
+    });
+
     // 2. Scene Management
     engine.register_type_with_name::<SceneHandle>("Scene");
     engine.register_fn("add_scene", |movie: &mut MovieHandle, duration: f64| {
@@ -111,6 +117,24 @@ pub fn register_rhai_api(engine: &mut Engine) {
                      box_node.bg_color = Some(crate::animation::Animated::new(color));
                  }
              }
+        }
+
+        // Shadows
+        if let Some(c) = props.get("shadow_color") {
+             if let Ok(s) = c.clone().into_string() {
+                 if let Some(color) = parse_hex_color(&s) {
+                     box_node.shadow_color = Some(crate::animation::Animated::new(color));
+                 }
+             }
+        }
+        if let Some(v) = props.get("shadow_blur").and_then(|v| v.as_float().ok()) {
+            box_node.shadow_blur = crate::animation::Animated::new(v as f32);
+        }
+        if let Some(v) = props.get("shadow_x").and_then(|v| v.as_float().ok()) {
+            box_node.shadow_offset_x = crate::animation::Animated::new(v as f32);
+        }
+        if let Some(v) = props.get("shadow_y").and_then(|v| v.as_float().ok()) {
+            box_node.shadow_offset_y = crate::animation::Animated::new(v as f32);
         }
 
         let id = d.add_node(Box::new(box_node));

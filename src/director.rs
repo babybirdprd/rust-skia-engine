@@ -41,6 +41,11 @@ pub struct Director {
     pub height: i32,
     /// Frames Per Second.
     pub fps: u32,
+    /// Number of sub-frame samples for motion blur (default: 1).
+    pub samples_per_frame: u32,
+    /// Shutter angle in degrees (0.0 to 360.0). Default: 180.0.
+    /// 180.0 degrees = 50% of frame duration.
+    pub shutter_angle: f32,
 }
 
 impl Director {
@@ -52,6 +57,8 @@ impl Director {
             width,
             height,
             fps,
+            samples_per_frame: 1, // Default to no motion blur
+            shutter_angle: 180.0,
         }
     }
 

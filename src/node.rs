@@ -75,6 +75,10 @@ pub struct BoxNode {
     pub bg_color: Option<Animated<Color>>,
     pub opacity: Animated<f32>,
     pub blur: Animated<f32>,
+    pub shadow_color: Option<Animated<Color>>,
+    pub shadow_blur: Animated<f32>,
+    pub shadow_offset_x: Animated<f32>,
+    pub shadow_offset_y: Animated<f32>,
 }
 
 impl BoxNode {
@@ -84,6 +88,10 @@ impl BoxNode {
             bg_color: None,
             opacity: Animated::new(1.0),
             blur: Animated::new(0.0),
+            shadow_color: None,
+            shadow_blur: Animated::new(0.0),
+            shadow_offset_x: Animated::new(0.0),
+            shadow_offset_y: Animated::new(0.0),
         }
     }
 }
@@ -99,8 +107,15 @@ impl Element for BoxNode {
             bg.update(time);
             changed = true;
         }
+        if let Some(sc) = &mut self.shadow_color {
+            sc.update(time);
+            changed = true;
+        }
         self.opacity.update(time);
         self.blur.update(time);
+        self.shadow_blur.update(time);
+        self.shadow_offset_x.update(time);
+        self.shadow_offset_y.update(time);
         changed
     }
 
@@ -108,16 +123,68 @@ impl Element for BoxNode {
         let local_opacity = self.opacity.current_value * opacity;
 
         let mut paint = Paint::default();
+        paint.set_anti_alias(true);
+
+        // Build Image Filters chain
+        // Logic: Input -> Blur -> Shadow
+        // Actually, Shadow should be applied to the shape.
+        // If we have Blur AND Shadow:
+        // Case A: The box is blurred, then casts a shadow.
+        // Case B: The box casts a shadow, and the box is blurred.
+        // Standard CSS `box-shadow` is roughly: Shadow is drawn behind, then Box is drawn on top.
+        // `image_filters::drop_shadow` draws BOTH.
+        // So `drop_shadow(blur(input))`.
+
+        let mut current_filter = None;
+
+        // 1. Blur
         if self.blur.current_value > 0.0 {
             let sigma = self.blur.current_value;
-            if let Some(filter) = skia_safe::image_filters::blur(
+            current_filter = skia_safe::image_filters::blur(
                 (sigma, sigma),
                 skia_safe::TileMode::Decal,
-                None,
+                current_filter.clone(),
                 None
-            ) {
-                paint.set_image_filter(filter);
-            }
+            );
+        }
+
+        // 2. Drop Shadow
+        if let Some(sc) = &self.shadow_color {
+            let color = sc.current_value.to_skia();
+            let sigma = self.shadow_blur.current_value;
+            let dx = self.shadow_offset_x.current_value;
+            let dy = self.shadow_offset_y.current_value;
+
+            // drop_shadow(delta, sigma, color, input, crop, crop_rect?)
+            // The error said `current_filter.as_ref()` failed trait bound `Into<Option<ColorSpace>>`.
+            // Wait, why ColorSpace?
+            // Because arg4 `input` expects `impl Into<Option<ImageFilter>>`.
+            // But if I messed up arguments, it might match wrong overload or type inference is confused.
+            // `drop_shadow` takes: (delta, sigmaX/Y, color, input, crop, crop_rect?)
+            // Let's look at `check_skia_api` error:
+            // "argument #6 is missing".
+            // So it takes 6 args.
+            // 1. delta: (f32, f32)
+            // 2. sigma: (f32, f32)
+            // 3. color: Color
+            // 4. input: Option<ImageFilter>
+            // 5. crop: Option<CropRect> ?
+            // 6. crop_rect: Option<Rect> ?
+
+            // Apply drop_shadow filter.
+            // Signature: (delta, sigma, color, color_space, input, crop)
+            current_filter = skia_safe::image_filters::drop_shadow(
+                (dx, dy),
+                (sigma, sigma),
+                color,
+                None, // color_space
+                current_filter, // input
+                None // crop
+            );
+        }
+
+        if let Some(filter) = current_filter {
+            paint.set_image_filter(filter);
         }
 
         if let Some(bg) = &self.bg_color {
@@ -133,6 +200,9 @@ impl Element for BoxNode {
         match property {
             "opacity" => self.opacity.add_keyframe(target, duration, ease_fn),
             "blur" => self.blur.add_keyframe(target, duration, ease_fn),
+            "shadow_blur" => self.shadow_blur.add_keyframe(target, duration, ease_fn),
+            "shadow_x" => self.shadow_offset_x.add_keyframe(target, duration, ease_fn),
+            "shadow_y" => self.shadow_offset_y.add_keyframe(target, duration, ease_fn),
             _ => {}
         }
     }
@@ -215,11 +285,23 @@ impl Element for TextNode {
             c.a *= opacity;
             paint.set_color4f(c.to_color4f(), None);
 
-            let font = skia_safe::Font::default();
+            // Text Fidelity Improvement: Match Font Family
+            let font_mgr = skia_safe::FontMgr::default();
+            let typeface = font_mgr.match_family_style(
+                self.font_family.as_str(),
+                skia_safe::FontStyle::normal()
+            ).unwrap_or_else(|| {
+                font_mgr.match_family_style("Sans Serif", skia_safe::FontStyle::normal())
+                        .expect("Failed to load default Typeface")
+            });
+
+            let font = skia_safe::Font::new(typeface, Some(self.font_size.current_value));
+
+            // Enable Anti-Aliasing for text
+            paint.set_anti_alias(true);
 
             for run in buffer.layout_runs() {
                  let origin_y = rect.top + run.line_y;
-
                  if let Some(blob) = TextBlob::from_str(run.text, &font) {
                       canvas.draw_text_blob(&blob, (rect.left, origin_y), &paint);
                  }
@@ -271,10 +353,19 @@ impl Element for ImageNode {
 
     fn render(&self, canvas: &Canvas, rect: Rect, parent_opacity: f32) {
         let op = self.opacity.current_value * parent_opacity;
-        let paint = Paint::new(Color4f::new(1.0, 1.0, 1.0, op), None);
+        let mut paint = Paint::new(Color4f::new(1.0, 1.0, 1.0, op), None);
+        paint.set_anti_alias(true);
 
         if let Some(img) = &self.image {
-             canvas.draw_image_rect(img, None, rect, &paint);
+             // High Quality Sampling (Trilinear: Linear Filter + Linear Mipmap)
+             let sampling = skia_safe::SamplingOptions::new(
+                 skia_safe::FilterMode::Linear,
+                 skia_safe::MipmapMode::Linear
+             );
+
+             // Use `draw_image_rect_with_sampling_options` which takes `impl Into<SamplingOptions>`.
+             // We pass `sampling` by value as it implements the trait (Copy/Clone).
+             canvas.draw_image_rect_with_sampling_options(img, None, rect, sampling, &paint);
         }
     }
 
