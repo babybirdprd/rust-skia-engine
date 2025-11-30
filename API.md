@@ -28,8 +28,12 @@ The `theme` module provides access to the Design System tokens.
 ## Objects
 
 ### `Movie`
-The root object created via `new_director(width, height, fps)`.
+The root object created via `new_director`.
 
+*   **`new_director(width: int, height: int, fps: int) -> Movie`**
+    *   Creates a new movie context.
+*   **`new_director(width: int, height: int, fps: int, config: Map) -> Movie`**
+    *   Creates a movie with config (e.g., `#{ mode: "export" }`).
 *   **`add_scene(duration: float) -> Scene`**
     *   Adds a new scene to the timeline.
 *   **`add_audio(path: string) -> AudioTrack`**
@@ -48,14 +52,17 @@ Represents a segment of time in the movie.
 
 *   **`add_box(props: Map) -> Node`**
     *   Adds a container box to the scene root.
-    *   See [Properties](#properties) below.
 *   **`add_text(props: Map) -> Node`**
     *   Adds text to the scene root.
+*   **`add_composition(movie: Movie) -> Node`**
+    *   Adds a nested composition (sub-timeline) to the scene.
+*   **`add_composition(movie: Movie, props: Map) -> Node`**
+    *   Adds a nested composition with layout properties.
 *   **`add_audio(path: string) -> AudioTrack`**
     *   Adds an audio track synced to this scene.
 
 ### `Node`
-A visual element in the scene graph (Box, Text, Image, Video).
+A visual element in the scene graph (Box, Text, Image, Video, Composition).
 
 *   **`add_box(props: Map) -> Node`**
     *   Adds a child box.
@@ -69,13 +76,25 @@ A visual element in the scene graph (Box, Text, Image, Video).
     *   Updates text content (supports Rich Text).
 *   **`set_style(style: Map)`**
     *   Updates style properties (text spans).
+*   **`set_pivot(x: float, y: float)`**
+    *   Sets the transformation pivot point (default 0.5, 0.5).
+*   **`set_mask(mask_node: Node)`**
+    *   Applies another node as an alpha mask for this node.
+*   **`set_blend_mode(mode: string)`**
+    *   Sets the blend mode.
+    *   **Modes**: `src_over` (default), `screen`, `overlay`, `multiply`, `darken`, `lighten`, `color_dodge`, `soft_light`, `difference`, etc.
 *   **`set_blur(radius: float)`**
     *   Sets/Animates gaussian blur.
 *   **`animate(prop: string, start: float, end: float, duration: float, easing: string)`**
     *   Animates a numeric property.
-    *   **Props**: `opacity`, `blur`, layout props (`width`, `height`, etc. if numeric), `size` (text), etc.
+    *   **Props**:
+        *   Layout: `width`, `height` (if numeric), `flex_grow`, etc.
+        *   Transform: `x`, `y`, `scale`, `rotation`, `skew_x`, `skew_y`.
+        *   Style: `opacity`, `blur`, `size` (text).
 *   **`path_animate(svg_path: string, duration: float, easing: string)`**
     *   Animates the node along an SVG path.
+*   **`add_animator(start_idx: int, end_idx: int, prop: string, start: float, end: float, duration: float, easing: string)`**
+    *   (Text Only) Animates a property on a specific range of characters (graphemes).
 
 ### `AudioTrack`
 Handle to an audio resource.
@@ -99,6 +118,7 @@ Applied via `add_box` or updated via maps.
 *   **Border**: `border_radius`, `border_width` (float), `border_color`.
 *   **Shadow**: `shadow_color`, `shadow_blur`, `shadow_x`, `shadow_y`.
 *   **Opacity**: `opacity` (0.0 - 1.0).
+*   **Overflow**: `overflow` ("visible", "hidden").
 
 ### Text Style
 *   `content`: String or Array of Rich Text Maps.

@@ -78,12 +78,55 @@ let box = scene.add_box(#{ width: 100.0, height: 100.0, bg_color: "#00FF00" });
 // Easing: linear, ease_in, ease_out, ease_in_out, bounce_out
 box.animate("width", 100.0, 500.0, 2.0, "ease_out");
 
+// Transform Animation
+box.animate("rotation", 0.0, 360.0, 2.0, "linear");
+box.animate("scale", 0.5, 1.5, 1.0, "ease_in_out");
+
 // Path Animation (SVG path)
 let ball = scene.add_box(#{ width: 20.0, height: 20.0, bg_color: "#FFF" });
 ball.path_animate("M 0 0 C 100 0 100 100 200 100", 3.0, "ease_in_out");
 ```
 
-## 5. Using the Theme System
+## 5. Compositing
+
+### Masks
+You can use any node to mask another. The alpha channel of the mask node determines visibility.
+
+```rust
+let bg = scene.add_box(#{ width: "100%", height: "100%", bg_color: "#FF0000" });
+let text_mask = scene.add_text(#{ content: "MASK", size: 200.0, weight: "bold" });
+
+// 'text_mask' will now mask 'bg'. Only the red pixels where the text is will be visible.
+bg.set_mask(text_mask);
+```
+
+### Blend Modes
+Apply standard Photoshop-style blend modes to nodes.
+
+```rust
+let overlay = scene.add_box(#{ width: "100%", height: "100%", bg_color: "#00FF00" });
+overlay.set_blend_mode("multiply"); // or "screen", "overlay", "soft_light", etc.
+```
+
+## 6. Nested Timelines (Compositions)
+
+You can create reusable movie clips (Compositions) and nest them inside scenes.
+
+```rust
+// 1. Define the reusable movie
+let clip = new_director(500, 500, 30);
+let c_scene = clip.add_scene(2.0);
+c_scene.add_box(#{ width: "100%", height: "100%", bg_color: "#0000FF" });
+
+// 2. Add it to the main movie
+// It behaves like a normal node but renders its own internal timeline
+scene.add_composition(clip, #{
+    width: 500.0,
+    height: 500.0
+});
+```
+
+## 7. Using the Theme System
 
 The `theme` module provides standardized tokens.
 
@@ -105,7 +148,7 @@ let content = scene.add_box(#{
 });
 ```
 
-## 6. Audio & Transitions
+## 8. Audio & Transitions
 
 ### Audio
 ```rust
@@ -129,7 +172,7 @@ let scene2 = movie.add_scene(5.0);
 movie.add_transition(scene1, scene2, "slide_left", 1.0, "ease_in_out");
 ```
 
-## 7. Motion Blur
+## 9. Motion Blur
 
 Enable cinematic motion blur for smoother animations.
 

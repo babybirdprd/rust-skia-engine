@@ -1,8 +1,8 @@
-# director-engine
+# Director Engine
 
 **A high-performance, frame-based 2D rendering engine written in Rust.**
 
-Designed to be a backend for programmatic video generation (similar to Remotion), it combines a Scene Graph, CSS-like layout (Taffy), Skia for high-quality rasterization, and Rhai for scripting.
+Designed to be embedded in Rust applications, `director-engine` combines a Scene Graph, CSS-like layout (Taffy), Skia for high-quality rasterization, and Rhai for scripting to enable programmatic video generation.
 
 ## 🌟 Core Philosophy
 
@@ -40,7 +40,16 @@ graph TD
     Encoder -->|MP4| Output[output.mp4]
 ```
 
-## 🚀 Setup & Installation
+## 📦 Installation
+
+Add this to your `Cargo.toml`:
+
+```toml
+[dependencies]
+director-engine = "1.1.0"
+rhai = "1.19.0" # Recommended to match engine's version
+anyhow = "1.0"
+```
 
 ### System Dependencies
 This crate depends on `skia-safe` and `video-rs` (ffmpeg).
@@ -50,50 +59,100 @@ This crate depends on `skia-safe` and `video-rs` (ffmpeg).
     *   **Ubuntu**: `sudo apt install libavutil-dev libavformat-dev libavcodec-dev libswscale-dev`
     *   **MacOS**: `brew install ffmpeg`
 
-### Running the Demo
-The project comes with a built-in demo script in `src/main.rs`.
+## 🚀 Quick Start
 
-```bash
-# Run with default features (requires FFmpeg)
-cargo run --release
+### 1. Rust Embedding
+Initialize the engine and run a script from your Rust application.
 
-# Run with Vulkan hardware acceleration (if supported)
-cargo run --release --features vulkan
+```rust
+use director_engine::{scripting, DefaultAssetLoader, render::render_export};
+use rhai::Engine;
+use std::sync::Arc;
+use std::path::PathBuf;
+
+fn main() -> anyhow::Result<()> {
+    // 1. Initialize Rhai Engine with Director API
+    let mut engine = Engine::new();
+    scripting::register_rhai_api(&mut engine, Arc::new(DefaultAssetLoader));
+
+    // 2. Define Script
+    let script = r#"
+        let movie = new_director(1920, 1080, 30);
+        let scene = movie.add_scene(5.0);
+
+        scene.add_text(#{
+            content: "Hello World",
+            size: 100.0,
+            color: "#FFFFFF"
+        });
+
+        movie
+    "#;
+
+    // 3. Compile & Execute
+    let movie_handle = engine.eval::<scripting::MovieHandle>(script)?;
+
+    // 4. Render
+    println!("Rendering...");
+    let mut director = movie_handle.director.lock().unwrap();
+    render_export(&mut director, PathBuf::from("output.mp4"), None, None)?;
+    println!("Done!");
+
+    Ok(())
+}
 ```
 
-### Mock Mode (Development)
-If you are in an environment without FFmpeg system libraries, you can run in **Mock Mode**. This verifies the logic, layout, and rendering pipeline without producing an actual MP4 file.
+### 2. Rhai Script Example
+The scripting API is designed to be intuitive and CSS-like.
 
-```bash
-cargo run --no-default-features --features mock_video
+```rust
+let movie = new_director(1080, 1920, 30);
+let scene = movie.add_scene(5.0);
+
+// Flexbox Layout
+let box = scene.add_box(#{
+    width: "100%",
+    height: "100%",
+    justify_content: "center",
+    align_items: "center",
+    bg_color: "#1e1e1e"
+});
+
+// Rich Text
+let text = box.add_text(#{
+    content: "Director Engine",
+    size: 80.0,
+    color: "#ffffff",
+    weight: "bold"
+});
+
+// Animation
+text.animate("scale", 0.0, 1.0, 1.5, "bounce_out");
+
+movie
 ```
-
-## 📚 Documentation
-
-*   **[Scripting Guide](SCRIPTING.md)**: A "How-To" guide with code examples for layout, animation, and effects.
-*   **[API Reference](API.md)**: Comprehensive reference for all available Rhai functions and properties.
 
 ## ✨ Features
 
 *   **Flexbox Layout**: Powered by [Taffy](https://github.com/DioxusLabs/taffy).
 *   **Rich Text**: Advanced typography with [cosmic-text](https://github.com/pop-os/cosmic-text) (gradients, mixed styles).
 *   **Animation**: Keyframe animation for any numeric property, plus SVG Path animation.
+*   **Compositing**: Advanced masking and blend modes (Overlay, Multiply, Screen, etc.).
+*   **Nested Timelines**: Create reusable `Composition` nodes with their own isolated timelines.
 *   **Transitions**: Built-in scene transitions (Fade, Slide, Wipe) with ripple-edit logic.
 *   **Audio**: Multi-track audio mixing with volume automation.
 *   **Motion Blur**: Cinematic motion blur via sub-frame accumulation.
 *   **Design System**: Integrated tokens for safe areas, spacing, and z-index.
 
+## 📚 Documentation
+
+*   **[Scripting Guide](SCRIPTING.md)**: A "How-To" guide for layout, animation, compositing, and effects.
+*   **[API Reference](API.md)**: Comprehensive reference for all available Rhai functions and properties.
+
 ## 📂 Project Structure
 
 *   `src/lib.rs`: Library entry point.
-*   `src/director.rs`: Core engine coordinator, Timeline logic, and Scene Graph management.
-*   `src/node.rs`: Implementation of specific nodes (`BoxNode`, `TextNode`, `ImageNode`, `VideoNode`).
-*   `src/element.rs`: The `Element` trait and visual primitives (Color, Gradient, TextSpan).
-*   `src/layout.rs`: Integration with the Taffy layout engine.
-*   `src/render.rs`: The main render loop, Skia integration, and shader effects.
+*   `src/director.rs`: Core engine coordinator.
 *   `src/scripting.rs`: Rhai bindings and API definition.
-*   `src/animation.rs`: Animation state, Keyframe logic, and Easing functions.
-*   `src/audio.rs`: Audio loading, decoding (Symphonia), and mixing logic.
-*   `src/tokens.rs`: Design System implementation (Safe Areas, Spacing).
-*   `src/video_wrapper.rs`: Abstraction layer for `video-rs` (handling mock vs real encoding).
-*   `src/main.rs`: CLI entry point and demo runner.
+*   `src/render.rs`: Skia rendering pipeline.
+*   `src/node.rs`: Visual node implementations.
