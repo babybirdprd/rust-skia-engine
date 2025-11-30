@@ -431,6 +431,58 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
     // 3. Elements
     engine.register_type_with_name::<NodeHandle>("Node");
 
+    engine.register_fn("add_box", |parent: &mut NodeHandle, props: rhai::Map| {
+        let mut d = parent.director.lock().unwrap();
+        let mut box_node = BoxNode::new();
+
+        if let Some(c) = props.get("bg_color") {
+             if let Ok(s) = c.clone().into_string() {
+                 if let Some(color) = parse_hex_color(&s) {
+                     box_node.bg_color = Some(crate::animation::Animated::new(color));
+                 }
+             }
+        }
+         if let Some(c) = props.get("shadow_color") {
+             if let Ok(s) = c.clone().into_string() {
+                 if let Some(color) = parse_hex_color(&s) {
+                     box_node.shadow_color = Some(crate::animation::Animated::new(color));
+                 }
+             }
+        }
+        if let Some(v) = props.get("shadow_blur").and_then(|v| v.as_float().ok()) {
+            box_node.shadow_blur = crate::animation::Animated::new(v as f32);
+        }
+        if let Some(v) = props.get("shadow_x").and_then(|v| v.as_float().ok()) {
+            box_node.shadow_offset_x = crate::animation::Animated::new(v as f32);
+        }
+        if let Some(v) = props.get("shadow_y").and_then(|v| v.as_float().ok()) {
+            box_node.shadow_offset_y = crate::animation::Animated::new(v as f32);
+        }
+        if let Some(v) = props.get("border_radius").and_then(|v| v.as_float().ok()) {
+            box_node.border_radius = crate::animation::Animated::new(v as f32);
+        }
+        if let Some(v) = props.get("border_width").and_then(|v| v.as_float().ok()) {
+            box_node.border_width = crate::animation::Animated::new(v as f32);
+        }
+        if let Some(c) = props.get("border_color") {
+             if let Ok(s) = c.clone().into_string() {
+                 if let Some(color) = parse_hex_color(&s) {
+                     box_node.border_color = Some(crate::animation::Animated::new(color));
+                 }
+             }
+        }
+        if let Some(s) = props.get("overflow").and_then(|v| v.clone().into_string().ok()) {
+            box_node.overflow = s;
+        }
+
+        parse_layout_style(&props, &mut box_node.style);
+
+        let id = d.add_node(Box::new(box_node));
+        d.add_child(parent.id, id);
+
+        NodeHandle { director: parent.director.clone(), id }
+    });
+
     engine.register_fn("add_box", |scene: &mut SceneHandle, props: rhai::Map| {
         let mut d = scene.director.lock().unwrap();
         let mut box_node = BoxNode::new();
@@ -565,6 +617,71 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          if let Some(n) = d.get_node_mut(node.id) {
              n.transform.pivot_x = x as f32;
              n.transform.pivot_y = y as f32;
+         }
+    });
+
+    engine.register_fn("set_mask", |node: &mut NodeHandle, mask: NodeHandle| {
+        let mut d = node.director.lock().unwrap();
+
+        // 1. Get the mask node's current parent
+        let old_parent = if let Some(m_node) = d.get_node(mask.id) {
+            m_node.parent
+        } else {
+            None
+        };
+
+        // 2. Remove mask from old parent's children list
+        if let Some(p_id) = old_parent {
+            d.remove_child(p_id, mask.id);
+        }
+
+        // 3. Set mask's parent to the new owner (node.id)
+        if let Some(m_node) = d.get_node_mut(mask.id) {
+            m_node.parent = Some(node.id);
+        }
+
+        // 4. Assign mask_node to owner
+        if let Some(n) = d.get_node_mut(node.id) {
+            n.mask_node = Some(mask.id);
+        }
+    });
+
+    engine.register_fn("set_blend_mode", |node: &mut NodeHandle, mode_str: &str| {
+         let mut d = node.director.lock().unwrap();
+         let mode = match mode_str {
+             "clear" => skia_safe::BlendMode::Clear,
+             "src" => skia_safe::BlendMode::Src,
+             "dst" => skia_safe::BlendMode::Dst,
+             "src_over" | "src-over" | "normal" => skia_safe::BlendMode::SrcOver,
+             "dst_over" | "dst-over" => skia_safe::BlendMode::DstOver,
+             "src_in" | "src-in" => skia_safe::BlendMode::SrcIn,
+             "dst_in" | "dst-in" => skia_safe::BlendMode::DstIn,
+             "src_out" | "src-out" => skia_safe::BlendMode::SrcOut,
+             "dst_out" | "dst-out" => skia_safe::BlendMode::DstOut,
+             "src_atop" | "src-atop" => skia_safe::BlendMode::SrcATop,
+             "dst_atop" | "dst-atop" => skia_safe::BlendMode::DstATop,
+             "xor" => skia_safe::BlendMode::Xor,
+             "plus" | "add" => skia_safe::BlendMode::Plus,
+             "modulate" => skia_safe::BlendMode::Modulate,
+             "screen" => skia_safe::BlendMode::Screen,
+             "overlay" => skia_safe::BlendMode::Overlay,
+             "darken" => skia_safe::BlendMode::Darken,
+             "lighten" => skia_safe::BlendMode::Lighten,
+             "color_dodge" | "color-dodge" => skia_safe::BlendMode::ColorDodge,
+             "color_burn" | "color-burn" => skia_safe::BlendMode::ColorBurn,
+             "hard_light" | "hard-light" => skia_safe::BlendMode::HardLight,
+             "soft_light" | "soft-light" => skia_safe::BlendMode::SoftLight,
+             "difference" => skia_safe::BlendMode::Difference,
+             "exclusion" => skia_safe::BlendMode::Exclusion,
+             "multiply" => skia_safe::BlendMode::Multiply,
+             "hue" => skia_safe::BlendMode::Hue,
+             "saturation" => skia_safe::BlendMode::Saturation,
+             "color" => skia_safe::BlendMode::Color,
+             "luminosity" => skia_safe::BlendMode::Luminosity,
+             _ => skia_safe::BlendMode::SrcOver,
+         };
+         if let Some(n) = d.get_node_mut(node.id) {
+             n.blend_mode = mode;
          }
     });
 
