@@ -259,7 +259,34 @@ fn render_recursive(director: &Director, node_id: crate::director::NodeId, canva
              }
          };
 
-         node.element.render(canvas, local_rect, parent_opacity, &mut draw_children);
+         // Check if we need a save layer for blending or masking
+         let need_layer = node.mask_node.is_some() || node.blend_mode != skia_safe::BlendMode::SrcOver;
+
+         if need_layer {
+             let mut paint = skia_safe::Paint::default();
+             paint.set_blend_mode(node.blend_mode);
+
+             // Create an isolated layer.
+             // If we have a mask, we need to ensure the content is drawn, then the mask is drawn with DstIn.
+             // This layer acts as the composition group.
+             canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&paint));
+
+             node.element.render(canvas, local_rect, parent_opacity, &mut draw_children);
+
+             if let Some(mask_id) = node.mask_node {
+                 let mut mask_paint = skia_safe::Paint::default();
+                 mask_paint.set_blend_mode(skia_safe::BlendMode::DstIn);
+
+                 // Create a layer for the mask, which will composite onto the content with DstIn
+                 canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&mask_paint));
+                 render_recursive(director, mask_id, canvas, 1.0);
+                 canvas.restore();
+             }
+
+             canvas.restore();
+         } else {
+             node.element.render(canvas, local_rect, parent_opacity, &mut draw_children);
+         }
 
          canvas.restore();
     }

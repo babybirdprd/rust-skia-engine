@@ -62,6 +62,10 @@ pub struct SceneNode {
     // Path Animation
     pub path_animation: Option<PathAnimationState>,
     pub transform: Transform,
+
+    // Masking & Compositing
+    pub mask_node: Option<NodeId>,
+    pub blend_mode: skia_safe::BlendMode,
 }
 
 impl SceneNode {
@@ -75,6 +79,8 @@ impl SceneNode {
             last_visit_time: -1.0,
             path_animation: None,
             transform: Transform::new(),
+            mask_node: None,
+            blend_mode: skia_safe::BlendMode::SrcOver,
         }
     }
 }
@@ -189,6 +195,16 @@ impl Director {
         }
     }
 
+    /// Removes a child from a parent node's children list.
+    /// Does NOT affect the child's `parent` field (caller must handle that if needed, e.g. re-parenting).
+    pub fn remove_child(&mut self, parent: NodeId, child: NodeId) {
+        if let Some(p_node) = self.nodes.get_mut(parent).and_then(|n| n.as_mut()) {
+            if let Some(pos) = p_node.children.iter().position(|&x| x == child) {
+                p_node.children.remove(pos);
+            }
+        }
+    }
+
     /// Returns a mutable reference to the SceneNode.
     pub fn get_node_mut(&mut self, id: NodeId) -> Option<&mut SceneNode> {
         self.nodes.get_mut(id).and_then(|n| n.as_mut())
@@ -227,6 +243,11 @@ impl Director {
             let children = node.children.clone();
             for child in children {
                 stack.push((child, time));
+            }
+
+            // Also traverse mask node to ensure it gets updates
+            if let Some(mask_id) = node.mask_node {
+                stack.push((mask_id, time));
             }
         }
 

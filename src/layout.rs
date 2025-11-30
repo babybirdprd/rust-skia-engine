@@ -67,6 +67,10 @@ impl LayoutEngine {
         for &child_id in &node.children {
             children_ids.push(self.build_recursive(director, child_id));
         }
+        // Include mask_node in layout
+        if let Some(mask_id) = node.mask_node {
+            children_ids.push(self.build_recursive(director, mask_id));
+        }
 
         let t_id = self.taffy.new_with_children(style, &children_ids).unwrap();
         self.node_map.insert(node_id, t_id);
@@ -76,19 +80,26 @@ impl LayoutEngine {
     fn write_back_recursive(&self, director: &mut Director, node_id: NodeId) {
         if let Some(t_id) = self.node_map.get(&node_id) {
             let layout = self.taffy.layout(*t_id).unwrap();
-            let node = director.get_node_mut(node_id).unwrap();
 
-            node.layout_rect = skia_safe::Rect::from_xywh(
-                layout.location.x,
-                layout.location.y,
-                layout.size.width,
-                layout.size.height,
-            );
+            // Scope for mutable borrow
+            let (children, mask_node) = {
+                let node = director.get_node_mut(node_id).unwrap();
+
+                node.layout_rect = skia_safe::Rect::from_xywh(
+                    layout.location.x,
+                    layout.location.y,
+                    layout.size.width,
+                    layout.size.height,
+                );
+                (node.children.clone(), node.mask_node)
+            };
 
             // Recurse
-             let children = node.children.clone();
              for child_id in children {
                  self.write_back_recursive(director, child_id);
+             }
+             if let Some(mask_id) = mask_node {
+                 self.write_back_recursive(director, mask_id);
              }
         }
     }
