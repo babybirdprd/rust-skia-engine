@@ -101,4 +101,20 @@ pub trait Element: std::fmt::Debug {
     // 5. Rich Text Interface
     fn set_rich_text(&mut self, _spans: Vec<TextSpan>) {}
     fn modify_text_spans(&mut self, _f: &dyn Fn(&mut Vec<TextSpan>)) {}
+
+    // 6. Text Animator Interface (RFC 009)
+    fn add_text_animator(
+        &mut self,
+        _start_idx: usize,
+        _end_idx: usize,
+        _property: String,
+        _start_val: f32,
+        _target_val: f32,
+        _duration: f64,
+        _easing: &str
+    ) {
+        // Default implementation: Warn user
+        // We can't access node ID easily here, but we can print "non-text node"
+        eprintln!("Warning: add_animator called on a non-text node.");
+    }
 }
