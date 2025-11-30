@@ -15,6 +15,35 @@ pub struct PathAnimationState {
     pub progress: Animated<f32>,
 }
 
+#[derive(Clone, Debug)]
+pub struct Transform {
+    pub scale_x: Animated<f32>,
+    pub scale_y: Animated<f32>,
+    pub rotation: Animated<f32>,
+    pub skew_x: Animated<f32>,
+    pub skew_y: Animated<f32>,
+    pub translate_x: Animated<f32>,
+    pub translate_y: Animated<f32>,
+    pub pivot_x: f32,
+    pub pivot_y: f32,
+}
+
+impl Transform {
+    pub fn new() -> Self {
+        Self {
+            scale_x: Animated::new(1.0),
+            scale_y: Animated::new(1.0),
+            rotation: Animated::new(0.0),
+            skew_x: Animated::new(0.0),
+            skew_y: Animated::new(0.0),
+            translate_x: Animated::new(0.0),
+            translate_y: Animated::new(0.0),
+            pivot_x: 0.5,
+            pivot_y: 0.5,
+        }
+    }
+}
+
 /// A wrapper around an `Element` that adds scene graph relationships.
 pub struct SceneNode {
     /// The actual visual element (Box, Text, etc.)
@@ -32,7 +61,7 @@ pub struct SceneNode {
 
     // Path Animation
     pub path_animation: Option<PathAnimationState>,
-    pub translation: (f32, f32),
+    pub transform: Transform,
 }
 
 impl SceneNode {
@@ -45,7 +74,7 @@ impl SceneNode {
             local_time: 0.0,
             last_visit_time: -1.0,
             path_animation: None,
-            translation: (0.0, 0.0),
+            transform: Transform::new(),
         }
     }
 }
@@ -207,6 +236,15 @@ impl Director {
                 if (node.last_visit_time - global_time).abs() < 0.0001 {
                     node.element.update(node.local_time);
 
+                    // Update Transform Animations
+                    node.transform.scale_x.update(node.local_time);
+                    node.transform.scale_y.update(node.local_time);
+                    node.transform.rotation.update(node.local_time);
+                    node.transform.skew_x.update(node.local_time);
+                    node.transform.skew_y.update(node.local_time);
+                    node.transform.translate_x.update(node.local_time);
+                    node.transform.translate_y.update(node.local_time);
+
                     // Update Path Animation
                     if let Some(path_anim) = &mut node.path_animation {
                         path_anim.progress.update(node.local_time);
@@ -214,7 +252,8 @@ impl Director {
                         let length = measure.length();
                         let dist = path_anim.progress.current_value * length;
                         if let Some((p, _tangent)) = measure.pos_tan(dist) {
-                             node.translation = (p.x, p.y);
+                             node.transform.translate_x.current_value = p.x;
+                             node.transform.translate_y.current_value = p.y;
                         }
                     }
                 }

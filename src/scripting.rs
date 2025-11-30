@@ -560,10 +560,42 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          }
     });
 
+    engine.register_fn("set_pivot", |node: &mut NodeHandle, x: f64, y: f64| {
+         let mut d = node.director.lock().unwrap();
+         if let Some(n) = d.get_node_mut(node.id) {
+             n.transform.pivot_x = x as f32;
+             n.transform.pivot_y = y as f32;
+         }
+    });
+
     engine.register_fn("animate", |node: &mut NodeHandle, prop: &str, start: f64, end: f64, dur: f64, ease: &str| {
         let mut d = node.director.lock().unwrap();
         if let Some(n) = d.get_node_mut(node.id) {
-             n.element.animate_property(prop, start as f32, end as f32, dur, ease);
+             let ease_fn = match ease {
+                 "linear" => EasingType::Linear,
+                 "ease_in" => EasingType::EaseIn,
+                 "ease_out" => EasingType::EaseOut,
+                 "ease_in_out" => EasingType::EaseInOut,
+                 "bounce_out" => EasingType::BounceOut,
+                 _ => EasingType::Linear,
+             };
+
+             match prop {
+                 "scale" => {
+                     n.transform.scale_x.add_segment(start as f32, end as f32, dur, ease_fn);
+                     n.transform.scale_y.add_segment(start as f32, end as f32, dur, ease_fn);
+                 },
+                 "scale_x" => n.transform.scale_x.add_segment(start as f32, end as f32, dur, ease_fn),
+                 "scale_y" => n.transform.scale_y.add_segment(start as f32, end as f32, dur, ease_fn),
+                 "rotation" => n.transform.rotation.add_segment(start as f32, end as f32, dur, ease_fn),
+                 "skew_x" => n.transform.skew_x.add_segment(start as f32, end as f32, dur, ease_fn),
+                 "skew_y" => n.transform.skew_y.add_segment(start as f32, end as f32, dur, ease_fn),
+                 "translate_x" | "x" => n.transform.translate_x.add_segment(start as f32, end as f32, dur, ease_fn),
+                 "translate_y" | "y" => n.transform.translate_y.add_segment(start as f32, end as f32, dur, ease_fn),
+                 _ => {
+                     n.element.animate_property(prop, start as f32, end as f32, dur, ease);
+                 }
+             }
         }
     });
 

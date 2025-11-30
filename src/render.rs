@@ -213,10 +213,43 @@ fn render_recursive(director: &Director, node_id: crate::director::NodeId, canva
     if let Some(node) = director.get_node(node_id) {
          canvas.save();
 
-         let dx = node.layout_rect.left + node.translation.0;
-         let dy = node.layout_rect.top + node.translation.1;
+         // Layout Position
+         let layout_x = node.layout_rect.left;
+         let layout_y = node.layout_rect.top;
 
-         canvas.translate((dx, dy));
+         // Transform Properties
+         let tx = node.transform.translate_x.current_value;
+         let ty = node.transform.translate_y.current_value;
+         let scale_x = node.transform.scale_x.current_value;
+         let scale_y = node.transform.scale_y.current_value;
+         let rotation = node.transform.rotation.current_value;
+         let skew_x = node.transform.skew_x.current_value;
+         let skew_y = node.transform.skew_y.current_value;
+
+         // Pivot Calculation (absolute)
+         let pivot_x = node.layout_rect.width() * node.transform.pivot_x;
+         let pivot_y = node.layout_rect.height() * node.transform.pivot_y;
+
+         // Apply Transform Stack
+         // 1. Move to position
+         canvas.translate((layout_x + tx, layout_y + ty));
+
+         // 2. Move to pivot
+         canvas.translate((pivot_x, pivot_y));
+
+         // 3. Rotate
+         canvas.rotate(rotation, None);
+
+         // 4. Scale
+         canvas.scale((scale_x, scale_y));
+
+         // 5. Skew (Degrees to Tangent)
+         let tan_skew_x = skew_x.to_radians().tan();
+         let tan_skew_y = skew_y.to_radians().tan();
+         canvas.skew((tan_skew_x, tan_skew_y));
+
+         // 6. Move back from pivot
+         canvas.translate((-pivot_x, -pivot_y));
 
          let local_rect = skia_safe::Rect::from_wh(node.layout_rect.width(), node.layout_rect.height());
 
