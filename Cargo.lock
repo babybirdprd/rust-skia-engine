@@ -411,6 +411,7 @@ dependencies = [
  "taffy",
  "tempfile",
  "thiserror",
+ "unicode-segmentation",
  "video-rs",
 ]
 

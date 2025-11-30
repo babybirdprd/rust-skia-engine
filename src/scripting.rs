@@ -702,6 +702,21 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          }
     });
 
+    engine.register_fn("add_animator", |node: &mut NodeHandle, start_idx: i64, end_idx: i64, prop: &str, start: f64, end: f64, dur: f64, ease: &str| {
+        let mut d = node.director.lock().unwrap();
+        if let Some(n) = d.get_node_mut(node.id) {
+             n.element.add_text_animator(
+                 start_idx as usize,
+                 end_idx as usize,
+                 prop.to_string(),
+                 start as f32,
+                 end as f32,
+                 dur,
+                 ease
+             );
+        }
+    });
+
     engine.register_fn("animate", |node: &mut NodeHandle, prop: &str, start: f64, end: f64, dur: f64, ease: &str| {
         let mut d = node.director.lock().unwrap();
         if let Some(n) = d.get_node_mut(node.id) {

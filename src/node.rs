@@ -1,6 +1,6 @@
 use skia_safe::{
-    Canvas, Paint, Rect, RRect, ClipOp, PaintStyle, Image, Color4f, Data, TextBlob, FontMgr,
-    FontStyle, ColorType, AlphaType, Path, Point, gradient_shader, TileMode,
+    Canvas, Paint, Rect, RRect, ClipOp, PaintStyle, Image, Color4f, Data, FontMgr,
+    FontStyle, ColorType, AlphaType, Path, Point, gradient_shader, TileMode, Matrix, TextBlobBuilder,
     font_style::{Weight as SkWeight, Width as SkWidth, Slant as SkSlant}
 };
 use taffy::style::Style;
@@ -11,6 +11,9 @@ use std::sync::{Arc, Mutex};
 use std::fmt;
 use std::io::Write;
 use tempfile::NamedTempFile;
+use unicode_segmentation::UnicodeSegmentation;
+use std::ops::Range;
+
 // Video imports
 use crate::video_wrapper::{AsyncDecoder, RenderMode, VideoResponse};
 
@@ -188,6 +191,14 @@ impl Element for BoxNode {
 }
 
 // --- Text Node ---
+
+#[derive(Debug)]
+pub struct TextAnimator {
+    pub range: Range<usize>, // Grapheme indices
+    pub property: String,    // "offset_x", "offset_y", "rotation", "scale", "opacity"
+    pub animation: Animated<f32>,
+}
+
 pub struct TextNode {
     pub spans: Vec<TextSpan>,
     pub default_font_size: Animated<f32>,
@@ -195,12 +206,16 @@ pub struct TextNode {
     pub buffer: Mutex<Option<Buffer>>,
     pub font_system: Arc<Mutex<FontSystem>>,
     pub swash_cache: Arc<Mutex<SwashCache>>,
+    // RFC 009
+    pub animators: Vec<TextAnimator>,
+    pub grapheme_starts: Vec<usize>, // Byte offsets of each grapheme start
 }
 
 impl fmt::Debug for TextNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TextNode")
          .field("spans", &self.spans)
+         .field("animators", &self.animators)
          .finish()
     }
 }
@@ -214,6 +229,8 @@ impl TextNode {
             buffer: Mutex::new(None),
             font_system: font_system.clone(),
             swash_cache,
+            animators: Vec::new(),
+            grapheme_starts: Vec::new(),
         };
         node.init_buffer();
         node
@@ -264,6 +281,12 @@ impl TextNode {
          }
 
          *self.buffer.lock().unwrap() = Some(buffer);
+
+         // Calculate grapheme starts
+         self.grapheme_starts = full_text
+             .grapheme_indices(true)
+             .map(|(i, _)| i)
+             .collect();
     }
 
     fn build_span_ranges(&self) -> Vec<std::ops::Range<usize>> {
@@ -287,6 +310,11 @@ impl Element for TextNode {
         self.default_font_size.update(time);
         self.default_color.update(time);
 
+        // Update Animators
+        for anim in &mut self.animators {
+            anim.animation.update(time);
+        }
+
         let size = self.default_font_size.current_value;
         let line_height = size * 1.2;
 
@@ -298,7 +326,7 @@ impl Element for TextNode {
         true
     }
 
-    fn render(&self, canvas: &Canvas, rect: Rect, _opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) {
+    fn render(&self, canvas: &Canvas, rect: Rect, opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) {
         let mut buf_guard = self.buffer.lock().unwrap();
         let _sc_guard = self.swash_cache.lock().unwrap();
 
@@ -315,7 +343,7 @@ impl Element for TextNode {
 
             let ranges = self.build_span_ranges();
 
-            // Pass 1: Backgrounds
+            // Pass 1: Backgrounds (Unmodified)
             for (span_idx, span) in self.spans.iter().enumerate() {
                 if span.background_color.is_some() {
                     let mut path = Path::new();
@@ -360,123 +388,165 @@ impl Element for TextNode {
                 }
             }
 
-            // Pass 2: Text (Strokes & Fills)
+            // Pass 2: Text Glyphs (RFC 009)
             for run in buffer.layout_runs() {
                  let origin_y = rect.top + run.line_y;
-                 let mut current_span_idx = None;
-                 let mut chunk_start_glyph_idx = 0;
+                 let origin_x = rect.left;
 
-                 // We group glyphs by span index
-                 for (i, glyph) in run.glyphs.iter().enumerate() {
-                     let glyph_span_idx = ranges.iter().position(|r| r.contains(&glyph.start));
+                 for glyph in run.glyphs.iter() {
+                     // 1. Identify Grapheme Index
+                     let grapheme_idx = match self.grapheme_starts.binary_search(&glyph.start) {
+                         Ok(i) => i,
+                         Err(i) => i.saturating_sub(1),
+                     };
 
-                     if glyph_span_idx != current_span_idx {
-                         // Flush previous chunk
-                         if let Some(s_idx) = current_span_idx {
-                             let span = &self.spans[s_idx];
-                             let start_g = &run.glyphs[chunk_start_glyph_idx];
-                             // The text slice for this chunk
-                             // Note: glyph.start is byte index. We need to find the range covered by [chunk_start..i]
-                             // It's safer to reconstruct from glyphs but TextBlob wants str.
-                             // We can slice run.text based on glyph start/end bytes?
-                             // glyphs[i-1].end should be the end of the last glyph.
-                             // run.text is the whole line.
-                             // Let's assume glyphs are ordered.
-                             let start_byte = start_g.start;
-                             let end_byte = run.glyphs[i-1].end; // last glyph in chunk
+                     // 2. Identify Span (for styling)
+                     let span_idx = ranges.iter().position(|r| r.contains(&glyph.start)).unwrap_or(0);
+                     let span = &self.spans[span_idx];
 
-                             // Find where these bytes are in run.text.
-                             // run.text might be a substring of the full text?
-                             // buffer.layout_runs() yields runs where run.text is a reference to the line's text.
-                             // cosmic-text glyph.start is global byte index.
-                             // We need local indices into run.text?
-                             // cosmic-text 0.11: run.text is slice.
-                             // but we can't easily map global index to local slice index without offsets.
-                             // Actually, simple hack:
-                             // TextBlob::from_str requires valid UTF-8 slice.
-                             // We can use span.text? No, span might be split across lines.
-                             // We can use the glyphs to find the text content?
-                             // Or just trust that we can draw the whole span text clipped? No.
+                     // 3. Compute Animators
+                     let mut offset_x = 0.0;
+                     let mut offset_y = 0.0;
+                     let mut rotation = 0.0;
+                     let mut scale = 1.0;
+                     let mut alpha = 1.0;
 
-                             // Better: We know the GLOBAL byte range [start_byte..end_byte].
-                             // We can lock the buffer, get the full text, and slice it.
-                             // But we can't access full text here easily (it's in buffer but buffer is borrowed as mutable).
-                             // Wait, buffer is borrowed. `buffer.lines` has text?
-
-                             // Alternative: run.text DOES correspond to the characters in the run.
-                             // Does `run.text` start at global index `run.text_start`? Not available on LayoutRun?
-                             // Let's look at `run.glyphs[0].start`.
-                             // If `run.text` corresponds to `glyphs`, we can find the sub-slice.
-                             // Let's assume `run.text` contains the text for all glyphs in the run.
-                             // We can try to find the substring in `run.text` that matches the length?
-                             // Or just use `start_byte` and `end_byte` if we knew `run.text`'s global offset.
-
-                             // Let's use `TextBlob::from_str(run.text)` and rely on `canvas.draw_text_blob` clipping? No.
-                             // We must separate them for styling.
-
-                             // Re-reading cosmic-text: `LayoutRun` has `text` field.
-                             // LayoutRun also has `line_i`.
-                             // Buffer has `lines`.
-                             // We can assume we can match the glyph's text by length?
-                             // glyph.c is the char? No.
-
-                             // Let's try to map indices relative to the Run.
-                             // If we track the FIRST glyph of the run, say it has start=100.
-                             // If `chunk_start` has start=105.
-                             // Then offset is 5.
-                             // But bytes vs chars.
-
-                             // Robust fallback:
-                             // We only need the text to generate the blob.
-                             // We have `span.text`. We know we are in `span`.
-                             // But `span` might be wrapped.
-                             // Using `run.text` is best.
-                             // Let's assume `run.text` covers from `run.glyphs.first().start` to `run.glyphs.last().end`.
-                             // Then `offset = glyph.start - run.glyphs[0].start`.
-
-                             if let Some(first_g_in_run) = run.glyphs.first() {
-                                 let run_start_global = first_g_in_run.start;
-                                 if start_byte >= run_start_global && end_byte >= start_byte {
-                                      let local_start = start_byte - run_start_global;
-                                      let local_end = end_byte - run_start_global;
-                                      if local_end <= run.text.len() {
-                                          let chunk_text = &run.text[local_start..local_end];
-                                          let x_pos = rect.left + start_g.x;
-
-                                          // Draw this chunk
-                                          draw_span_chunk(
-                                              canvas, chunk_text, x_pos, origin_y, span, &font,
-                                              &self.default_color.current_value
-                                          );
-                                      }
-                                 }
+                     for anim in &self.animators {
+                         if anim.range.contains(&grapheme_idx) {
+                             let val = anim.animation.current_value;
+                             match anim.property.as_str() {
+                                 "x" | "offset_x" => offset_x += val,
+                                 "y" | "offset_y" => offset_y += val,
+                                 "rotation" => rotation += val,
+                                 "scale" => scale *= val,
+                                 "opacity" => alpha *= val,
+                                 _ => {}
                              }
                          }
-                         current_span_idx = glyph_span_idx;
-                         chunk_start_glyph_idx = i;
                      }
-                 }
-                 // Flush last chunk
-                 if let Some(s_idx) = current_span_idx {
-                     let span = &self.spans[s_idx];
-                     if let Some(start_g) = run.glyphs.get(chunk_start_glyph_idx) {
-                          let start_byte = start_g.start;
-                          let end_byte = run.glyphs.last().unwrap().end;
-                          if let Some(first_g_in_run) = run.glyphs.first() {
-                               let run_start_global = first_g_in_run.start;
-                               if start_byte >= run_start_global && end_byte >= start_byte {
-                                    let local_start = start_byte - run_start_global;
-                                    let local_end = end_byte - run_start_global;
-                                    if local_end <= run.text.len() {
-                                        let chunk_text = &run.text[local_start..local_end];
-                                        let x_pos = rect.left + start_g.x;
-                                        draw_span_chunk(
-                                            canvas, chunk_text, x_pos, origin_y, span, &font,
-                                            &self.default_color.current_value
-                                        );
-                                    }
-                               }
-                          }
+
+                     // 4. Resolve Style
+                     let size = span.font_size.unwrap_or(self.default_font_size.current_value);
+                     let mut typeface = font.typeface();
+
+                     if span.font_weight.is_some() || span.font_style.is_some() || span.font_family.is_some() {
+                         let mgr = FontMgr::default();
+                         let family = span.font_family.as_deref().unwrap_or("Sans Serif");
+                         let weight = span.font_weight.map(|w| SkWeight::from(w as i32)).unwrap_or(SkWeight::NORMAL);
+                         let slant = if span.font_style.as_deref() == Some("italic") {
+                             SkSlant::Italic
+                         } else {
+                             SkSlant::Upright
+                         };
+                         if let Some(tf) = mgr.match_family_style(family, FontStyle::new(weight, SkWidth::NORMAL, slant)) {
+                             typeface = tf;
+                         }
+                     }
+                     let glyph_font = skia_safe::Font::new(typeface, Some(size));
+
+                     // 5. Create Blob using TextBlobBuilder (Preserve Ligatures)
+                     let mut builder = TextBlobBuilder::new();
+                     let glyph_id = glyph.glyph_id as u16;
+                     let blob_buffer = builder.alloc_run(&glyph_font, 1, (0.0, 0.0), None);
+                     blob_buffer[0] = glyph_id;
+
+                     if let Some(blob) = builder.make() {
+                         canvas.save();
+
+                         // Position
+                         let x = origin_x + glyph.x;
+                         let y = origin_y + glyph.y;
+
+                         // Pivot: Center of Glyph
+                         let mut bounds = [Rect::default(); 1];
+                         glyph_font.get_bounds(&[glyph_id], &mut bounds, None);
+                         let bound = bounds[0];
+                         // Bound is relative to (0,0) of the glyph origin.
+                         let pivot_x = bound.center_x();
+                         let pivot_y = bound.center_y();
+
+                         let px = x + pivot_x;
+                         let py = y + pivot_y;
+
+                         // Apply Transforms
+                         canvas.translate((px, py));
+                         canvas.rotate(rotation, None);
+                         canvas.scale((scale, scale));
+                         canvas.translate((-px, -py));
+
+                         // Apply Offset
+                         canvas.translate((offset_x, offset_y));
+
+                         // Setup Paint
+                         let mut paint = Paint::default();
+                         paint.set_anti_alias(true);
+
+                         // Color & Opacity
+                         let base_color = span.color.unwrap_or(self.default_color.current_value);
+                         let mut final_color = base_color;
+                         final_color.a *= alpha * opacity;
+
+                         // Stroke
+                         if let Some(sw) = span.stroke_width {
+                             if sw > 0.0 {
+                                 let mut sp = paint.clone();
+                                 sp.set_style(PaintStyle::Stroke);
+                                 sp.set_stroke_width(sw);
+                                 if let Some(sc) = span.stroke_color {
+                                     let mut sc_c = sc;
+                                     sc_c.a *= alpha * opacity;
+                                     sp.set_color4f(sc_c.to_color4f(), None);
+                                 } else {
+                                     sp.set_color(skia_safe::Color::BLACK);
+                                     sp.set_alpha_f(alpha * opacity);
+                                 }
+                                 canvas.draw_text_blob(&blob, (x, y), &sp);
+                             }
+                         }
+
+                         // Fill
+                         paint.set_style(PaintStyle::Fill);
+                         if let Some(grad) = &span.fill_gradient {
+                             // Gradient Logic: Relative to Node's layout rect
+                             // Node's layout rect (0,0 to w,h) in local coords
+                             let w = rect.width();
+                             let h = rect.height();
+                             let origin_rect = Rect::from_xywh(0.0, 0.0, w, h);
+
+                             let p0 = Point::new(
+                                 origin_rect.left + grad.start.0 * w,
+                                 origin_rect.top + grad.start.1 * h
+                             );
+                             let p1 = Point::new(
+                                 origin_rect.left + grad.end.0 * w,
+                                 origin_rect.top + grad.end.1 * h
+                             );
+                             let colors: Vec<skia_safe::Color> = grad.colors.iter().map(|c| c.to_skia()).collect();
+                             let positions = grad.positions.as_ref().map(|v| v.as_slice());
+
+                             // Calculate local matrix to undo the glyph's translation
+                             // We are currently translated to (x+off, y+off).
+                             // We want (0,0) in our shader to map to (x+off, y+off) in global.
+                             // So we translate shader by (x+off, y+off).
+                             let matrix = Matrix::translate((x + offset_x, y + offset_y));
+
+                             if let Some(shader) = gradient_shader::linear(
+                                 (p0, p1),
+                                 colors.as_slice(),
+                                 positions,
+                                 TileMode::Clamp,
+                                 None,
+                                 Some(&matrix) // Apply local matrix
+                             ) {
+                                 paint.set_shader(shader);
+                                 paint.set_alpha_f(alpha * opacity);
+                             }
+                         } else {
+                             paint.set_color4f(final_color.to_color4f(), None);
+                         }
+
+                         canvas.draw_text_blob(&blob, (x, y), &paint);
+                         canvas.restore();
                      }
                  }
             }
@@ -501,110 +571,28 @@ impl Element for TextNode {
         f(&mut self.spans);
         self.init_buffer();
     }
-}
 
-// Helper for drawing text chunks
-fn draw_span_chunk(
-    canvas: &Canvas,
-    text: &str,
-    x: f32,
-    y: f32,
-    span: &TextSpan,
-    default_font: &skia_safe::Font,
-    default_color: &Color
-) {
-    // Resolve Font
-    let size = span.font_size.unwrap_or(default_font.size());
-    let mut typeface = default_font.typeface();
-    // If typeface() returned Option in other versions, we'd handle it, but here it seems to be Typeface.
-    // If it's actually Option and I'm misreading the error chain, this might fail differently.
-    // But the previous error `no method unwrap_or_else found for struct RCHandle` is definitive.
+    // RFC 009
+    fn add_text_animator(
+        &mut self,
+        start_idx: usize,
+        end_idx: usize,
+        property: String,
+        start_val: f32,
+        target_val: f32,
+        duration: f64,
+        easing: &str
+    ) {
+        let ease_fn = parse_easing(easing);
+        let mut anim = Animated::new(start_val);
+        anim.add_keyframe(target_val, duration, ease_fn);
 
-    if span.font_weight.is_some() || span.font_style.is_some() || span.font_family.is_some() {
-         let mgr = FontMgr::default();
-         let family = span.font_family.as_deref().unwrap_or("Sans Serif");
-
-         let weight = span.font_weight.map(|w| SkWeight::from(w as i32)).unwrap_or(SkWeight::NORMAL);
-         let slant = if span.font_style.as_deref() == Some("italic") {
-             SkSlant::Italic
-         } else {
-             SkSlant::Upright
-         };
-
-         let style = FontStyle::new(weight, SkWidth::NORMAL, slant);
-         if let Some(tf) = mgr.match_family_style(family, style) {
-             typeface = tf;
-         }
-    }
-
-    let font = skia_safe::Font::new(typeface, Some(size));
-
-    if let Some(blob) = TextBlob::from_str(text, &font) {
-        // 1. Stroke
-        if let Some(sw) = span.stroke_width {
-            if sw > 0.0 {
-                let mut p = Paint::default();
-                p.set_anti_alias(true);
-                p.set_style(PaintStyle::Stroke);
-                p.set_stroke_width(sw);
-                if let Some(c) = span.stroke_color {
-                    p.set_color4f(c.to_color4f(), None);
-                } else {
-                    p.set_color(skia_safe::Color::BLACK);
-                }
-                canvas.draw_text_blob(&blob, (x, y), &p);
-            }
-        }
-
-        // 2. Fill (Gradient or Color)
-        let mut p = Paint::default();
-        p.set_anti_alias(true);
-        p.set_style(PaintStyle::Fill);
-
-        if let Some(grad) = &span.fill_gradient {
-             let bounds = blob.bounds();
-             // bounds is relative to (0,0) of the blob.
-             // We need relative coordinates based on the text size/bounds.
-             // Usually for text gradients, we map relative to the line height or the specific blob bounds?
-             // RFC says "Relative (0.0 to 1.0) is relative to the text bounding box".
-             // We can use `bounds` offset by (x, y).
-
-             let w = bounds.width();
-             let h = bounds.height();
-             // Actual bounds of the text rendered
-             let origin_rect = Rect::from_xywh(x + bounds.left, y + bounds.top, w, h);
-
-             let p0 = Point::new(
-                 origin_rect.left + grad.start.0 * origin_rect.width(),
-                 origin_rect.top + grad.start.1 * origin_rect.height()
-             );
-             let p1 = Point::new(
-                 origin_rect.left + grad.end.0 * origin_rect.width(),
-                 origin_rect.top + grad.end.1 * origin_rect.height()
-             );
-
-             let colors: Vec<skia_safe::Color> = grad.colors.iter().map(|c| c.to_skia()).collect();
-
-             // Convert positions to Option slice
-             let positions = grad.positions.as_ref().map(|v| v.as_slice());
-
-             if let Some(shader) = gradient_shader::linear(
-                 (p0, p1),
-                 colors.as_slice(),
-                 positions,
-                 TileMode::Clamp,
-                 None,
-                 None
-             ) {
-                 p.set_shader(shader);
-             }
-        } else {
-             // Solid Color
-             let c = span.color.unwrap_or(*default_color);
-             p.set_color4f(c.to_color4f(), None);
-        }
-
-        canvas.draw_text_blob(&blob, (x, y), &p);
+        let animator = TextAnimator {
+            range: start_idx..end_idx,
+            property,
+            animation: anim,
+        };
+        self.animators.push(animator);
     }
 }
 

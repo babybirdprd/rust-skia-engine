@@ -421,3 +421,20 @@ fn draw_transition(
         eprintln!("Shader compilation error: {:?}", result.err());
     }
 }
+
+pub fn render_frame(director: &mut Director, time: f64, canvas: &skia_safe::Canvas) {
+     let mut layout_engine = LayoutEngine::new();
+     director.update(time);
+     layout_engine.compute_layout(director, time);
+
+     canvas.clear(skia_safe::Color::BLACK);
+
+     let mut items: Vec<(usize, TimelineItem)> = director.timeline.iter().cloned().enumerate()
+         .filter(|(_, item)| time >= item.start_time && time < item.start_time + item.duration)
+         .collect();
+     items.sort_by_key(|(_, item)| item.z_index);
+
+     for (_, item) in items {
+         render_recursive(director, item.scene_root, canvas, 1.0);
+     }
+}
