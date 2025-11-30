@@ -30,7 +30,7 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
     let total_frames = (max_duration * fps as f64).ceil() as usize;
 
     let destination: Locator = out_path.into();
-    let settings = EncoderSettings::for_h264_yuv420p(width as usize, height as usize, false);
+    let settings = EncoderSettings::preset_h264_yuv420p(width as usize, height as usize, false);
 
     let mut encoder = Encoder::new(&destination, settings)?;
 

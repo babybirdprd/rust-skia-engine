@@ -139,8 +139,8 @@ pub struct TextNode {
     pub swash_cache: Arc<Mutex<SwashCache>>,
 }
 
-impl std::fmt::Debug for TextNode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for TextNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TextNode")
          .field("spans", &self.spans)
          .finish()
@@ -326,7 +326,6 @@ impl Element for ImageNode {
 }
 
 // --- Video Node ---
-#[derive(Debug)]
 pub struct VideoNode {
     decoder: Mutex<Option<Decoder>>,
     pub opacity: Animated<f32>,

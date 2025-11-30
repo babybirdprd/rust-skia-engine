@@ -1,6 +1,9 @@
 // Conditional re-export or mock of video-rs types
 #[cfg(feature = "video-rs")]
-pub use video_rs::{Decoder, Encoder, EncoderSettings, Locator, Time, Frame};
+pub use video_rs::{
+    Decoder, Encoder, Location as Locator, Time, Frame,
+    encode::Settings as EncoderSettings,
+};
 
 #[cfg(not(feature = "video-rs"))]
 pub mod mock {
@@ -35,7 +38,7 @@ pub mod mock {
 
     pub struct EncoderSettings;
     impl EncoderSettings {
-        pub fn for_h264_yuv420p(_w: usize, _h: usize, _b: bool) -> Self { Self }
+        pub fn preset_h264_yuv420p(_w: usize, _h: usize, _b: bool) -> Self { Self }
     }
 
     #[derive(Clone, Copy, Debug, PartialEq)]
