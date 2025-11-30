@@ -1,7 +1,7 @@
 use rhai::{Engine, Map};
 use crate::director::{Director, NodeId, TimelineItem, PathAnimationState};
 use crate::node::{BoxNode, TextNode, ImageNode, VideoNode};
-use crate::element::{Color, TextSpan};
+use crate::element::{Color, TextSpan, GradientConfig};
 use crate::animation::{Animated, EasingType};
 use crate::AssetLoader;
 use std::sync::{Arc, Mutex};
@@ -64,6 +64,79 @@ fn parse_hex_color(hex: &str) -> Option<Color> {
         b as f32 / 255.0,
         1.0
     ))
+}
+
+fn parse_text_style(map: &rhai::Map, span: &mut TextSpan) {
+    if let Some(c) = map.get("color").and_then(|v| v.clone().into_string().ok()) {
+        span.color = parse_hex_color(&c);
+    }
+    if let Some(w_str) = map.get("weight").and_then(|v| v.clone().into_string().ok()) {
+        if w_str == "bold" { span.font_weight = Some(700); }
+    }
+    if let Some(s) = map.get("size").and_then(|v| v.as_float().ok()) {
+        span.font_size = Some(s as f32);
+    }
+    // Rich Text Fields
+    if let Some(c) = map.get("background_color").and_then(|v| v.clone().into_string().ok()) {
+        span.background_color = parse_hex_color(&c);
+    }
+    if let Some(p) = map.get("background_padding").and_then(|v| v.as_float().ok()) {
+        span.background_padding = Some(p as f32);
+    }
+    if let Some(w) = map.get("stroke_width").and_then(|v| v.as_float().ok()) {
+        span.stroke_width = Some(w as f32);
+    }
+    if let Some(c) = map.get("stroke_color").and_then(|v| v.clone().into_string().ok()) {
+        span.stroke_color = parse_hex_color(&c);
+    }
+    if let Some(g) = map.get("fill_gradient") {
+        if let Ok(arr) = g.clone().into_array() {
+            // Simple array of colors
+             let mut colors = Vec::new();
+             for item in arr {
+                 if let Ok(s) = item.into_string() {
+                     if let Some(c) = parse_hex_color(&s) {
+                         colors.push(c);
+                     }
+                 }
+             }
+             if !colors.is_empty() {
+                 span.fill_gradient = Some(GradientConfig {
+                     colors,
+                     ..Default::default()
+                 });
+             }
+        } else if let Some(gmap) = g.clone().try_cast::<Map>() {
+             // Advanced map
+             let mut config = GradientConfig::default();
+             if let Some(arr) = gmap.get("colors").and_then(|v| v.clone().into_array().ok()) {
+                  let mut colors = Vec::new();
+                  for item in arr {
+                      if let Ok(s) = item.into_string() {
+                          if let Some(c) = parse_hex_color(&s) {
+                              colors.push(c);
+                          }
+                      }
+                  }
+                  config.colors = colors;
+             }
+             if let Some(arr) = gmap.get("start").and_then(|v| v.clone().into_array().ok()) {
+                 if arr.len() >= 2 {
+                     let x = arr[0].as_float().unwrap_or(0.0) as f32;
+                     let y = arr[1].as_float().unwrap_or(0.0) as f32;
+                     config.start = (x, y);
+                 }
+             }
+             if let Some(arr) = gmap.get("end").and_then(|v| v.clone().into_array().ok()) {
+                 if arr.len() >= 2 {
+                     let x = arr[0].as_float().unwrap_or(0.0) as f32;
+                     let y = arr[1].as_float().unwrap_or(0.0) as f32;
+                     config.end = (x, y);
+                 }
+             }
+             span.fill_gradient = Some(config);
+        }
+    }
 }
 
 fn parse_layout_style(props: &rhai::Map, style: &mut Style) {
@@ -152,6 +225,61 @@ fn parse_layout_style(props: &rhai::Map, style: &mut Style) {
     if let Some(m) = props.get("margin").and_then(to_lpa) {
         style.margin = Rect { left: m, right: m, top: m, bottom: m };
     }
+}
+
+fn parse_spans_from_dynamic(content: rhai::Dynamic) -> Vec<TextSpan> {
+    let mut spans = Vec::new();
+     if let Ok(arr) = content.clone().into_array() {
+         for item in arr {
+             if let Some(map) = item.clone().try_cast::<Map>() {
+                 let text = map.get("text").map(|v| v.to_string()).unwrap_or_default();
+                 let mut span = TextSpan {
+                     text,
+                     color: None,
+                     font_family: None,
+                     font_weight: None,
+                     font_style: None,
+                     font_size: None,
+                     background_color: None,
+                     background_padding: None,
+                     stroke_width: None,
+                     stroke_color: None,
+                     fill_gradient: None,
+                 };
+                 parse_text_style(&map, &mut span);
+                 spans.push(span);
+             } else if let Ok(s) = item.into_string() {
+                 spans.push(TextSpan {
+                     text: s,
+                     color: None,
+                     font_family: None,
+                     font_weight: None,
+                     font_style: None,
+                     font_size: None,
+                     background_color: None,
+                     background_padding: None,
+                     stroke_width: None,
+                     stroke_color: None,
+                     fill_gradient: None,
+                 });
+             }
+         }
+     } else if let Ok(s) = content.into_string() {
+         spans.push(TextSpan {
+             text: s,
+             color: None,
+             font_family: None,
+             font_weight: None,
+             font_style: None,
+             font_size: None,
+             background_color: None,
+             background_padding: None,
+             stroke_width: None,
+             stroke_color: None,
+             fill_gradient: None,
+         });
+     }
+     spans
 }
 
 pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
@@ -273,37 +401,11 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          let fs = Arc::new(Mutex::new(FontSystem::new()));
          let sc = Arc::new(Mutex::new(SwashCache::new()));
 
-         let mut spans = Vec::new();
-
-         if let Some(content_array) = props.get("content").and_then(|v| v.clone().into_array().ok()) {
-             for item in content_array {
-                 if let Some(map) = item.clone().try_cast::<Map>() {
-                     let text = map.get("text").map(|v| v.to_string()).unwrap_or_default();
-                     let mut span = TextSpan {
-                         text,
-                         color: None,
-                         font_family: None,
-                         font_weight: None,
-                         font_style: None,
-                         font_size: None,
-                     };
-                     if let Some(c) = map.get("color").and_then(|v| v.clone().into_string().ok()) {
-                         span.color = parse_hex_color(&c);
-                     }
-                     if let Some(w_str) = map.get("weight").and_then(|v| v.clone().into_string().ok()) {
-                         if w_str == "bold" { span.font_weight = Some(700); }
-                     }
-                     if let Some(s) = map.get("size").and_then(|v| v.as_float().ok()) {
-                         span.font_size = Some(s as f32);
-                     }
-                     spans.push(span);
-                 } else if let Ok(s) = item.into_string() {
-                     spans.push(TextSpan { text: s, color: None, font_family: None, font_weight: None, font_style: None, font_size: None });
-                 }
-             }
-         } else if let Some(s) = props.get("content").map(|v| v.to_string()) {
-             spans.push(TextSpan { text: s, color: None, font_family: None, font_weight: None, font_style: None, font_size: None });
-         }
+         let spans = if let Some(c) = props.get("content") {
+             parse_spans_from_dynamic(c.clone())
+         } else {
+             Vec::new()
+         };
 
          let text_node = TextNode::new(spans, fs, sc);
 
@@ -314,37 +416,41 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          NodeHandle { director: parent.director.clone(), id }
     });
 
-    engine.register_fn("set_content", |node: &mut NodeHandle, content: rhai::Dynamic| {
-         let mut spans = Vec::new();
-         if let Ok(arr) = content.clone().into_array() {
-              for item in arr {
-                  if let Some(map) = item.clone().try_cast::<Map>() {
-                     let text = map.get("text").map(|v| v.to_string()).unwrap_or_default();
-                     let mut span = TextSpan {
-                         text,
-                         color: None,
-                         font_family: None,
-                         font_weight: None,
-                         font_style: None,
-                         font_size: None,
-                     };
-                     if let Some(c) = map.get("color").and_then(|v| v.clone().into_string().ok()) {
-                         span.color = parse_hex_color(&c);
-                     }
-                     if let Some(w_str) = map.get("weight").and_then(|v| v.clone().into_string().ok()) {
-                         if w_str == "bold" { span.font_weight = Some(700); }
-                     }
-                     if let Some(s) = map.get("size").and_then(|v| v.as_float().ok()) {
-                         span.font_size = Some(s as f32);
-                     }
-                     spans.push(span);
-                  }
-              }
-         }
+    engine.register_fn("add_text", |scene: &mut SceneHandle, props: rhai::Map| {
+         let fs = Arc::new(Mutex::new(FontSystem::new()));
+         let sc = Arc::new(Mutex::new(SwashCache::new()));
 
+         let spans = if let Some(c) = props.get("content") {
+             parse_spans_from_dynamic(c.clone())
+         } else {
+             Vec::new()
+         };
+
+         let text_node = TextNode::new(spans, fs, sc);
+
+         let mut d = scene.director.lock().unwrap();
+         let id = d.add_node(Box::new(text_node));
+         d.add_child(scene.root_id, id);
+
+         NodeHandle { director: scene.director.clone(), id }
+    });
+
+    engine.register_fn("set_content", |node: &mut NodeHandle, content: rhai::Dynamic| {
+         let spans = parse_spans_from_dynamic(content);
          let mut d = node.director.lock().unwrap();
          if let Some(n) = d.get_node_mut(node.id) {
              n.element.set_rich_text(spans);
+         }
+    });
+
+    engine.register_fn("set_style", |node: &mut NodeHandle, style: rhai::Map| {
+         let mut d = node.director.lock().unwrap();
+         if let Some(n) = d.get_node_mut(node.id) {
+             n.element.modify_text_spans(&|spans| {
+                 for span in spans {
+                     parse_text_style(&style, span);
+                 }
+             });
          }
     });
 

@@ -50,6 +50,25 @@ impl CanTween for Color {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct GradientConfig {
+    pub colors: Vec<Color>,
+    pub positions: Option<Vec<f32>>,
+    pub start: (f32, f32), // Relative 0.0 to 1.0
+    pub end: (f32, f32),   // Relative 0.0 to 1.0
+}
+
+impl Default for GradientConfig {
+    fn default() -> Self {
+        Self {
+            colors: vec![Color::BLACK, Color::WHITE],
+            positions: None,
+            start: (0.0, 0.0),
+            end: (0.0, 1.0), // Default Top-to-Bottom
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TextSpan {
     pub text: String,
@@ -58,6 +77,12 @@ pub struct TextSpan {
     pub font_weight: Option<u16>,
     pub font_style: Option<String>,
     pub font_size: Option<f32>,
+    // Rich Text / RFC 003
+    pub background_color: Option<Color>,
+    pub background_padding: Option<f32>,
+    pub stroke_width: Option<f32>,
+    pub stroke_color: Option<Color>,
+    pub fill_gradient: Option<GradientConfig>,
 }
 
 pub trait Element: std::fmt::Debug {
@@ -75,4 +100,5 @@ pub trait Element: std::fmt::Debug {
 
     // 5. Rich Text Interface
     fn set_rich_text(&mut self, _spans: Vec<TextSpan>) {}
+    fn modify_text_spans(&mut self, _f: &dyn Fn(&mut Vec<TextSpan>)) {}
 }
