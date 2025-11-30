@@ -35,16 +35,6 @@ impl LayoutEngine {
                 let taffy_root = self.build_recursive(director, root_id);
 
                 // 2. Compute Layout
-                // The root node of a scene fills the screen by default?
-                // Or we respect its style?
-                // Existing code forced root size.
-                // Let's force it for consistency.
-
-                // Note: We can't easily modify the style inside `director` from here without mutable borrow,
-                // but `build_recursive` reads style.
-                // Taffy allows overriding root size in `compute_layout`.
-                // We pass Definite size which acts as constraints.
-
                 self.taffy.compute_layout(
                     taffy_root,
                     Size {

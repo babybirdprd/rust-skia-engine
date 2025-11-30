@@ -137,7 +137,8 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
                  if bytes.len() == width as usize * height as usize * 4 {
                     let vec_bytes = bytes.to_vec();
                     let frame = Array3::from_shape_vec(frame_shape, vec_bytes)?;
-                    encoder.encode(&frame, &Time::from_nth_of_second(i, fps))?;
+                    let t = Time::from_secs_f64(i as f64 / fps as f64);
+                    encoder.encode(&frame, t)?;
                  }
              }
         } else {
@@ -152,7 +153,8 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
              if surface.read_pixels(&info, &mut bytes, (width * 4) as usize, (0, 0)) {
                  let frame_shape = (height as usize, width as usize, 4);
                  let frame = Array3::from_shape_vec(frame_shape, bytes)?;
-                 encoder.encode(&frame, &Time::from_nth_of_second(i, fps))?;
+                 let t = Time::from_secs_f64(i as f64 / fps as f64);
+                 encoder.encode(&frame, t)?;
              }
         }
     }

@@ -15,8 +15,7 @@ pub mod mock {
     pub struct Decoder;
     impl Decoder {
         pub fn new(_path: &Path) -> Result<Self, String> { Ok(Self) }
-        // Mock decode: returns time and frame (RGB)
-        pub fn decode(&mut self, _time: &Time) -> Result<(Time, Array3<u8>), anyhow::Error> {
+        pub fn decode(&mut self) -> Result<(Time, Array3<u8>), anyhow::Error> {
              Ok((Time, Array3::zeros((10, 10, 3))))
         }
     }
@@ -26,7 +25,7 @@ pub mod mock {
         pub fn new(_dest: &Locator, _settings: EncoderSettings) -> Result<Self> { Ok(Self) }
         pub fn finish(self) -> Result<()> { Ok(()) }
 
-        pub fn encode(&mut self, _frame: &Array3<u8>, _time: &Time) -> Result<()> {
+        pub fn encode(&mut self, _frame: &Array3<u8>, _time: Time) -> Result<()> {
             Ok(())
         }
     }
@@ -44,8 +43,9 @@ pub mod mock {
     #[derive(Clone, Copy, Debug, PartialEq)]
     pub struct Time;
     impl Time {
-        pub fn from_nth_of_second(_n: usize, _fps: u32) -> Self { Self }
-        pub fn from_secs(_s: f64) -> Self { Self }
+        pub fn from_nth_of_a_second(_n: usize, _fps: u32) -> Self { Self }
+        pub fn from_secs(_s: f32) -> Self { Self }
+        pub fn from_secs_f64(_s: f64) -> Self { Self }
     }
 
     pub struct Frame;
