@@ -10,7 +10,7 @@ use tempfile::NamedTempFile;
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError};
 use std::thread;
 // Video imports
-use crate::video_wrapper::{Decoder, Time};
+use crate::video_wrapper::Decoder;
 
 // Helper to parse easing
 fn parse_easing(e: &str) -> EasingType {
@@ -353,7 +353,7 @@ impl VideoNode {
 
         thread::spawn(move || {
             let _keep_alive = temp_clone;
-            if let Ok(mut decoder) = Decoder::new(&path) {
+            if let Ok(mut decoder) = Decoder::new(&*path) {
                 // Initial decode at 0
                 let mut current_decoder_time: f64 = 0.0;
 
@@ -369,17 +369,16 @@ impl VideoNode {
                         // If we are far off, seek
                         let diff: f64 = t - current_decoder_time;
                         if diff.abs() > 0.5 {
-                             // Seek logic if video-rs supported it comfortably,
-                             // for now we just skip frames or continue.
-                             // video-rs decode(&t) takes a time, so it seeks internally!
-                             current_decoder_time = t;
+                             let ms = (t * 1000.0) as i64;
+                             if decoder.seek(ms).is_ok() {
+                                 current_decoder_time = t;
+                             }
                         }
                     }
 
                     // Decode next frame
                     // We try to stay ahead of current_decoder_time
-                    let decode_t = Time::from_secs(current_decoder_time);
-                    match decoder.decode(&decode_t) {
+                    match decoder.decode() {
                         Ok((_, frame)) => {
                              // Convert to Skia Image
                              let shape = frame.shape();
