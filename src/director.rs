@@ -4,6 +4,7 @@ use skia_safe::{Path, PathMeasure};
 use crate::animation::{Animated, EasingType};
 use crate::AssetLoader;
 use crate::audio::{AudioMixer, AudioTrack};
+use crate::video_wrapper::RenderMode;
 use std::sync::Arc;
 
 /// A unique identifier for a node in the scene graph.
@@ -133,6 +134,8 @@ pub struct Director {
     pub samples_per_frame: u32,
     /// Shutter angle in degrees (0.0 to 360.0). Default: 180.0.
     pub shutter_angle: f32,
+    /// Render Mode (Preview or Export)
+    pub render_mode: RenderMode,
     /// Asset loader for resolving file paths to bytes.
     pub asset_loader: Arc<dyn AssetLoader>,
     /// Audio Mixer state
@@ -141,7 +144,7 @@ pub struct Director {
 
 impl Director {
     /// Creates a new Director instance.
-    pub fn new(width: i32, height: i32, fps: u32, asset_loader: Arc<dyn AssetLoader>) -> Self {
+    pub fn new(width: i32, height: i32, fps: u32, asset_loader: Arc<dyn AssetLoader>, render_mode: RenderMode) -> Self {
         Self {
             nodes: Vec::new(),
             timeline: Vec::new(),
@@ -151,6 +154,7 @@ impl Director {
             fps,
             samples_per_frame: 1, // Default to no motion blur
             shutter_angle: 180.0,
+            render_mode,
             asset_loader,
             audio_mixer: AudioMixer::new(48000),
         }

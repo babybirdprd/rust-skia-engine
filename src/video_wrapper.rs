@@ -1,10 +1,32 @@
 // Conditional re-export or mock of video-rs types
+use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
+use std::path::PathBuf;
+use std::thread;
+use std::collections::VecDeque;
+use anyhow::Result;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RenderMode {
+    Preview,
+    Export,
+}
+
+pub enum VideoCommand {
+    GetFrame(f64), // Timestamp
+}
+
+#[derive(Debug)]
+pub enum VideoResponse {
+    Frame(f64, Vec<u8>, u32, u32), // timestamp, data, w, h
+    EndOfStream,
+    Error(String),
+}
 
 #[cfg(feature = "video-rs")]
 mod real {
-    use anyhow::Result;
-    use video_rs::ffmpeg::{self, format, codec, software, ChannelLayout};
+    use super::*;
     use video_rs::{Time, Location as Locator};
+    use video_rs::ffmpeg::{self, format, codec, software, ChannelLayout};
     use ndarray::Array3;
 
     pub struct EncoderSettings {
@@ -224,18 +246,175 @@ mod real {
              Ok(())
         }
     }
+
+    #[derive(Debug)]
+    pub struct AsyncDecoder {
+        cmd_tx: Sender<VideoCommand>,
+        resp_rx: Receiver<VideoResponse>,
+        mode: RenderMode,
+    }
+
+    impl AsyncDecoder {
+        pub fn new(path: PathBuf, mode: RenderMode) -> Result<Self> {
+            let (cmd_tx, cmd_rx) = unbounded();
+            let (resp_tx, resp_rx) = if mode == RenderMode::Export {
+                bounded(0)
+            } else {
+                bounded(5)
+            };
+
+            thread::spawn(move || {
+                let mut decoder = match video_rs::Decoder::new(&path) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        let _ = resp_tx.send(VideoResponse::Error(e.to_string()));
+                        return;
+                    }
+                };
+
+                let mut cache: VecDeque<(f64, Vec<u8>, u32, u32)> = VecDeque::with_capacity(15);
+                let mut current_decoder_time = 0.0;
+
+                loop {
+                     let target_time = if mode == RenderMode::Preview {
+                         match cmd_rx.recv() {
+                             Ok(VideoCommand::GetFrame(mut t)) => {
+                                 while let Ok(VideoCommand::GetFrame(next_t)) = cmd_rx.try_recv() {
+                                     t = next_t;
+                                 }
+                                 t
+                             }
+                             Err(_) => break,
+                         }
+                     } else {
+                         match cmd_rx.recv() {
+                             Ok(VideoCommand::GetFrame(t)) => t,
+                             Err(_) => break,
+                         }
+                     };
+
+                     // Check Cache
+                     if let Some(frame_idx) = cache.iter().position(|(t, _, _, _)| (t - target_time).abs() < 0.02) {
+                         let (t, data, w, h) = &cache[frame_idx];
+                         if resp_tx.send(VideoResponse::Frame(*t, data.clone(), *w, *h)).is_err() {
+                             break;
+                         }
+                         continue;
+                     }
+
+                     // Decode
+                     let diff = target_time - current_decoder_time;
+                     if diff < -0.1 || diff > 2.0 {
+                         let ms = (target_time * 1000.0) as i64;
+                         if let Err(e) = decoder.seek(ms) {
+                             if mode == RenderMode::Export {
+                                 let _ = resp_tx.send(VideoResponse::Error(format!("Seek failed: {}", e)));
+                             }
+                             continue;
+                         }
+                         current_decoder_time = target_time;
+                     }
+
+                     let max_decode_steps = 60;
+                     let mut steps = 0;
+                     let mut found = false;
+
+                     loop {
+                         match decoder.decode() {
+                             Ok((time, frame)) => {
+                                 steps += 1;
+                                 let t = time.as_secs_f64();
+                                 current_decoder_time = t;
+
+                                 let shape = frame.shape();
+                                 if shape.len() == 3 && shape[2] >= 3 {
+                                     let h = shape[0] as u32;
+                                     let w = shape[1] as u32;
+                                     let (bytes, _) = frame.into_raw_vec_and_offset();
+
+                                     let data = if shape[2] == 3 {
+                                         let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+                                         for chunk in bytes.chunks(3) {
+                                             rgba.extend_from_slice(chunk);
+                                             rgba.push(255);
+                                         }
+                                         rgba
+                                     } else {
+                                         bytes
+                                     };
+
+                                     if cache.len() >= 15 {
+                                         cache.pop_front();
+                                     }
+                                     cache.push_back((t, data.clone(), w, h));
+
+                                     if (t - target_time).abs() < 0.04 {
+                                         if resp_tx.send(VideoResponse::Frame(t, data, w, h)).is_err() {
+                                              return;
+                                         }
+                                         found = true;
+                                         break;
+                                     }
+                                 }
+
+                                 if t > target_time + 0.1 {
+                                     break;
+                                 }
+                                 if steps > max_decode_steps {
+                                     break;
+                                 }
+                             }
+                             Err(_) => {
+                                 if mode == RenderMode::Export {
+                                     let _ = resp_tx.send(VideoResponse::EndOfStream);
+                                 }
+                                 break;
+                             }
+                         }
+                     }
+
+                     if !found && mode == RenderMode::Export {
+                          // Could not find frame
+                          // Check if we already sent error/EOS
+                          // If not, send error
+                          // But we can't easily check channel state.
+                          // Let's assume if the loop broke, we failed to find it.
+                          // Ideally we should track if we sent response.
+                          // But resp_tx.send blocks in Export mode (size 0).
+                          // So if we didn't send anything, main thread is waiting.
+                          // We MUST send something.
+                          let _ = resp_tx.send(VideoResponse::Error("Frame not found".to_string()));
+                     }
+                }
+            });
+
+            Ok(Self { cmd_tx, resp_rx, mode })
+        }
+
+        pub fn send_request(&self, time: f64) {
+             let _ = self.cmd_tx.send(VideoCommand::GetFrame(time));
+        }
+
+        pub fn get_response(&self) -> Option<VideoResponse> {
+             if self.mode == RenderMode::Export {
+                 self.resp_rx.recv().ok()
+             } else {
+                 self.resp_rx.try_recv().ok()
+             }
+        }
+    }
 }
 
 #[cfg(feature = "video-rs")]
 pub use real::*;
 #[cfg(feature = "video-rs")]
-pub use video_rs::{Decoder, Location as Locator, Time, Frame, ffmpeg};
+pub use video_rs::{Time, Frame, ffmpeg};
 
 #[cfg(not(feature = "video-rs"))]
 pub mod mock {
-    use std::path::Path;
-    use anyhow::Result;
+    use super::*;
     use ndarray::Array3;
+    use std::path::Path;
 
     #[derive(Debug)]
     pub struct Decoder;
@@ -251,14 +430,8 @@ pub mod mock {
     impl Encoder {
         pub fn new(_dest: &Locator, _settings: EncoderSettings) -> Result<Self> { Ok(Self) }
         pub fn finish(self) -> Result<()> { Ok(()) }
-
-        pub fn encode(&mut self, _frame: &Array3<u8>, _time: Time) -> Result<()> {
-            Ok(())
-        }
-
-        pub fn encode_audio(&mut self, _samples: &[f32], _time: Time) -> Result<()> {
-            Ok(())
-        }
+        pub fn encode(&mut self, _frame: &Array3<u8>, _time: Time) -> Result<()> { Ok(()) }
+        pub fn encode_audio(&mut self, _samples: &[f32], _time: Time) -> Result<()> { Ok(()) }
     }
 
     pub struct Locator;
@@ -281,6 +454,44 @@ pub mod mock {
     }
 
     pub struct Frame;
+
+    #[derive(Debug)]
+    pub struct AsyncDecoder {
+        cmd_tx: Sender<VideoCommand>,
+        resp_rx: Receiver<VideoResponse>,
+        mode: RenderMode,
+    }
+
+    impl AsyncDecoder {
+        pub fn new(_path: PathBuf, mode: RenderMode) -> Result<Self> {
+            let (cmd_tx, cmd_rx) = unbounded();
+            let (resp_tx, resp_rx) = bounded(5);
+
+            thread::spawn(move || {
+                loop {
+                    let t = match cmd_rx.recv() {
+                         Ok(VideoCommand::GetFrame(t)) => t,
+                         Err(_) => break,
+                    };
+                    thread::sleep(std::time::Duration::from_millis(10));
+                    // Return Mock Frame
+                    let _ = resp_tx.send(VideoResponse::Frame(t, vec![255; 100], 10, 10));
+                }
+            });
+
+            Ok(Self { cmd_tx, resp_rx, mode })
+        }
+        pub fn send_request(&self, time: f64) {
+             let _ = self.cmd_tx.send(VideoCommand::GetFrame(time));
+        }
+        pub fn get_response(&self) -> Option<VideoResponse> {
+             if self.mode == RenderMode::Export {
+                 self.resp_rx.recv().ok()
+             } else {
+                 self.resp_rx.try_recv().ok()
+             }
+        }
+    }
 }
 
 #[cfg(not(feature = "video-rs"))]

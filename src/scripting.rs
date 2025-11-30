@@ -1,6 +1,7 @@
 use rhai::{Engine, Map, Module};
 use crate::director::{Director, NodeId, TimelineItem, PathAnimationState, Transition, TransitionType};
 use crate::node::{BoxNode, TextNode, ImageNode, VideoNode};
+use crate::video_wrapper::RenderMode;
 use crate::element::{Color, TextSpan, GradientConfig};
 use crate::animation::{Animated, EasingType};
 use crate::tokens::DesignSystem;
@@ -334,8 +335,23 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
     // 1. Director/Movie
     engine.register_type_with_name::<MovieHandle>("Movie");
     let loader_clone = loader.clone();
+
+    // Overload 1: 3 args (Default Preview)
+    let l1 = loader_clone.clone();
     engine.register_fn("new_director", move |w: i64, h: i64, fps: i64| {
-        let director = Director::new(w as i32, h as i32, fps as u32, loader_clone.clone());
+        let director = Director::new(w as i32, h as i32, fps as u32, l1.clone(), RenderMode::Preview);
+        MovieHandle { director: Arc::new(Mutex::new(director)) }
+    });
+
+    // Overload 2: 4 args (Config)
+    let l2 = loader_clone.clone();
+    engine.register_fn("new_director", move |w: i64, h: i64, fps: i64, config: rhai::Map| {
+        let mode_str = config.get("mode").and_then(|v| v.clone().into_string().ok()).unwrap_or_else(|| "preview".to_string());
+        let mode = match mode_str.as_str() {
+            "export" => RenderMode::Export,
+            _ => RenderMode::Preview,
+        };
+        let director = Director::new(w as i32, h as i32, fps as u32, l2.clone(), mode);
         MovieHandle { director: Arc::new(Mutex::new(director)) }
     });
 
@@ -548,8 +564,9 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
     engine.register_fn("add_video", |parent: &mut NodeHandle, path: &str| {
          let mut d = parent.director.lock().unwrap();
          let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let mode = d.render_mode;
 
-         let vid_node = VideoNode::new(bytes);
+         let vid_node = VideoNode::new(bytes, mode);
          let id = d.add_node(Box::new(vid_node));
          d.add_child(parent.id, id);
          NodeHandle { director: parent.director.clone(), id }

@@ -11,10 +11,8 @@ use std::sync::{Arc, Mutex};
 use std::fmt;
 use std::io::Write;
 use tempfile::NamedTempFile;
-use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError};
-use std::thread;
 // Video imports
-use crate::video_wrapper::Decoder;
+use crate::video_wrapper::{AsyncDecoder, RenderMode, VideoResponse};
 
 // Helper to parse easing
 fn parse_easing(e: &str) -> EasingType {
@@ -666,97 +664,29 @@ pub struct VideoNode {
     pub opacity: Animated<f32>,
     current_frame: Mutex<Option<(f64, Image)>>,
 
-    // Threading
-    frame_receiver: Receiver<(f64, Image)>,
-    control_sender: Sender<f64>,
+    decoder: Option<AsyncDecoder>,
+    render_mode: RenderMode,
+
     // Keep temp file alive
     #[allow(dead_code)]
     temp_file: Arc<NamedTempFile>,
 }
 
 impl VideoNode {
-    pub fn new(data: Vec<u8>) -> Self {
+    pub fn new(data: Vec<u8>, mode: RenderMode) -> Self {
         // Write data to temp file
         let mut temp = NamedTempFile::new().expect("Failed to create temp file");
         temp.write_all(&data).expect("Failed to write video data");
         let path = temp.path().to_owned();
         let temp_arc = Arc::new(temp);
 
-        let (frame_tx, frame_rx) = bounded(5);
-        let (ctrl_tx, ctrl_rx) = unbounded();
-
-        let temp_clone = temp_arc.clone();
-
-        thread::spawn(move || {
-            let _keep_alive = temp_clone;
-            if let Ok(mut decoder) = Decoder::new(&*path) {
-                // Initial decode at 0
-                let mut current_decoder_time: f64 = 0.0;
-
-                loop {
-                    // Check for seek/update
-                    // We drain the control channel to get the latest requested time
-                    let mut target_time = None;
-                    while let Ok(t) = ctrl_rx.try_recv() {
-                        target_time = Some(t);
-                    }
-
-                    if let Some(t) = target_time {
-                        // If we are far off, seek
-                        let diff: f64 = t - current_decoder_time;
-                        if diff.abs() > 0.5 {
-                             let ms = (t * 1000.0) as i64;
-                             if decoder.seek(ms).is_ok() {
-                                 current_decoder_time = t;
-                             }
-                        }
-                    }
-
-                    // Decode next frame
-                    // We try to stay ahead of current_decoder_time
-                    match decoder.decode() {
-                        Ok((_, frame)) => {
-                             // Convert to Skia Image
-                             let shape = frame.shape();
-                             if shape.len() == 3 && shape[2] >= 3 {
-                                 let h = shape[0];
-                                 let w = shape[1];
-                                 let (bytes, _) = frame.into_raw_vec_and_offset();
-                                 let data = Data::new_copy(&bytes);
-
-                                 // Assuming RGB888 for now (3 bytes)
-                                 let info = skia_safe::ImageInfo::new(
-                                     (w as i32, h as i32),
-                                     ColorType::RGB888x,
-                                     AlphaType::Opaque,
-                                     None
-                                 );
-
-                                 if let Some(img) = skia_safe::images::raster_from_data(&info, data, w * 3) {
-                                      // Send to main thread
-                                      if frame_tx.send((current_decoder_time, img)).is_err() {
-                                          break; // Channel closed
-                                      }
-                                 }
-                             }
-                             // Advance time guess (assuming 30fps if we don't know)
-                             // Ideally we get duration from decode result.
-                             current_decoder_time += 1.0 / 30.0;
-                        }
-                        Err(_) => {
-                            // End of stream or error, wait a bit
-                            thread::sleep(std::time::Duration::from_millis(100));
-                        }
-                    }
-                }
-            }
-        });
+        let decoder = AsyncDecoder::new(path, mode).ok();
 
         Self {
             opacity: Animated::new(1.0),
             current_frame: Mutex::new(None),
-            frame_receiver: frame_rx,
-            control_sender: ctrl_tx,
+            decoder,
+            render_mode: mode,
             temp_file: temp_arc,
         }
     }
@@ -770,29 +700,38 @@ impl Element for VideoNode {
     fn update(&mut self, time: f64) -> bool {
         self.opacity.update(time);
 
-        // Notify thread of current time
-        let _ = self.control_sender.send(time);
+        if let Some(decoder) = &self.decoder {
+            decoder.send_request(time);
 
-        // Check if we have a frame in the queue that matches (or is close)
-        // Or if we need to wait?
-        // Non-blocking check
-        loop {
-            match self.frame_receiver.try_recv() {
-                Ok((t, img)) => {
-                    if t >= time - 0.1 {
-                        // Found a usable frame
-                        *self.current_frame.lock().unwrap() = Some((t, img));
-                        // If it's the exact one or future, stop.
-                        // If it's slightly past, we still use it (closest next).
-                        break;
-                    }
-                    // If t < time - 0.1, it's too old, discard and loop
-                }
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => break,
+            if let Some(resp) = decoder.get_response() {
+                 match resp {
+                     VideoResponse::Frame(t, data, w, h) => {
+                         let data = Data::new_copy(&data);
+                         let info = skia_safe::ImageInfo::new(
+                             (w as i32, h as i32),
+                             ColorType::RGBA8888,
+                             AlphaType::Unpremul,
+                             None
+                         );
+
+                         if let Some(img) = skia_safe::images::raster_from_data(&info, data, (w * 4) as usize) {
+                              *self.current_frame.lock().unwrap() = Some((t, img));
+                         }
+                     }
+                     VideoResponse::EndOfStream => {
+                         if self.render_mode == RenderMode::Export {
+                             return false;
+                         }
+                     }
+                     VideoResponse::Error(e) => {
+                         if self.render_mode == RenderMode::Export {
+                             eprintln!("Video Error: {}", e);
+                             return false;
+                         }
+                     }
+                 }
             }
         }
-
         true
     }
 
