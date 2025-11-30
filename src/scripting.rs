@@ -1,11 +1,13 @@
 use rhai::{Engine, Map};
 use crate::director::{Director, NodeId, TimelineItem, PathAnimationState};
-use crate::node::{BoxNode, TextNode};
+use crate::node::{BoxNode, TextNode, ImageNode, VideoNode};
 use crate::element::{Color, TextSpan};
 use crate::animation::{Animated, EasingType};
 use std::sync::{Arc, Mutex};
 use cosmic_text::{FontSystem, SwashCache};
 use skia_safe::Path;
+use taffy::style::{Style, FlexDirection, AlignItems, JustifyContent, Dimension, LengthPercentage, LengthPercentageAuto};
+use taffy::geometry::Rect;
 
 /// Wrapper around `Director` for Rhai scripting.
 #[derive(Clone)]
@@ -54,6 +56,94 @@ fn parse_hex_color(hex: &str) -> Option<Color> {
         b as f32 / 255.0,
         1.0
     ))
+}
+
+fn parse_layout_style(props: &rhai::Map, style: &mut Style) {
+    let to_dim = |v: &rhai::Dynamic| -> Option<Dimension> {
+        if let Ok(f) = v.as_float() { Some(Dimension::length(f as f32)) }
+        else if let Ok(s) = v.clone().into_string() {
+            if s == "auto" { Some(Dimension::auto()) }
+            else if s.ends_with("%") {
+                if let Ok(p) = s.trim_end_matches('%').parse::<f32>() {
+                     Some(Dimension::percent(p / 100.0))
+                } else { None }
+            } else { None }
+        } else { None }
+    };
+
+    if let Some(w) = props.get("width").and_then(to_dim) { style.size.width = w; }
+    if let Some(h) = props.get("height").and_then(to_dim) { style.size.height = h; }
+
+    if let Some(s) = props.get("flex_direction").and_then(|v| v.clone().into_string().ok()) {
+        style.flex_direction = match s.as_str() {
+            "row" => FlexDirection::Row,
+            "column" => FlexDirection::Column,
+            "row_reverse" | "row-reverse" => FlexDirection::RowReverse,
+            "column_reverse" | "column-reverse" => FlexDirection::ColumnReverse,
+            _ => FlexDirection::Row,
+        };
+    }
+
+    if let Some(s) = props.get("align_items").and_then(|v| v.clone().into_string().ok()) {
+        style.align_items = match s.as_str() {
+            "center" => Some(AlignItems::Center),
+            "flex_start" | "flex-start" | "start" => Some(AlignItems::FlexStart),
+            "flex_end" | "flex-end" | "end" => Some(AlignItems::FlexEnd),
+            "stretch" => Some(AlignItems::Stretch),
+            _ => Some(AlignItems::Stretch),
+        };
+    }
+
+    if let Some(s) = props.get("justify_content").and_then(|v| v.clone().into_string().ok()) {
+        style.justify_content = match s.as_str() {
+            "center" => Some(JustifyContent::Center),
+            "flex_start" | "flex-start" | "start" => Some(JustifyContent::FlexStart),
+            "flex_end" | "flex-end" | "end" => Some(JustifyContent::FlexEnd),
+            "space_between" | "space-between" => Some(JustifyContent::SpaceBetween),
+            "space_around" | "space-around" => Some(JustifyContent::SpaceAround),
+            "space_evenly" | "space-evenly" => Some(JustifyContent::SpaceEvenly),
+            _ => Some(JustifyContent::FlexStart),
+        };
+    }
+
+    if let Some(f) = props.get("flex_grow").and_then(|v| v.as_float().ok()) {
+        style.flex_grow = f as f32;
+    }
+    if let Some(f) = props.get("flex_shrink").and_then(|v| v.as_float().ok()) {
+        style.flex_shrink = f as f32;
+    }
+
+    // Padding/Margin
+    let to_lp = |v: &rhai::Dynamic| -> Option<LengthPercentage> {
+        if let Ok(f) = v.as_float() { Some(LengthPercentage::length(f as f32)) }
+        else if let Ok(s) = v.clone().into_string() {
+             if s.ends_with("%") {
+                if let Ok(p) = s.trim_end_matches('%').parse::<f32>() {
+                     Some(LengthPercentage::percent(p / 100.0))
+                } else { None }
+            } else { None }
+        } else { None }
+    };
+
+    if let Some(p) = props.get("padding").and_then(to_lp) {
+        style.padding = Rect { left: p, right: p, top: p, bottom: p };
+    }
+
+    let to_lpa = |v: &rhai::Dynamic| -> Option<LengthPercentageAuto> {
+         if let Ok(f) = v.as_float() { Some(LengthPercentageAuto::length(f as f32)) }
+         else if let Ok(s) = v.clone().into_string() {
+             if s == "auto" { Some(LengthPercentageAuto::auto()) }
+             else if s.ends_with("%") {
+                if let Ok(p) = s.trim_end_matches('%').parse::<f32>() {
+                     Some(LengthPercentageAuto::percent(p / 100.0))
+                } else { None }
+            } else { None }
+         } else { None }
+    };
+
+    if let Some(m) = props.get("margin").and_then(to_lpa) {
+        style.margin = Rect { left: m, right: m, top: m, bottom: m };
+    }
 }
 
 pub fn register_rhai_api(engine: &mut Engine) {
@@ -126,10 +216,28 @@ pub fn register_rhai_api(engine: &mut Engine) {
             box_node.shadow_offset_y = crate::animation::Animated::new(v as f32);
         }
 
+        parse_layout_style(&props, &mut box_node.style);
+
         let id = d.add_node(Box::new(box_node));
         d.add_child(scene.root_id, id);
 
         NodeHandle { director: scene.director.clone(), id }
+    });
+
+    engine.register_fn("add_image", |parent: &mut NodeHandle, path: &str| {
+         let img_node = ImageNode::new(path);
+         let mut d = parent.director.lock().unwrap();
+         let id = d.add_node(Box::new(img_node));
+         d.add_child(parent.id, id);
+         NodeHandle { director: parent.director.clone(), id }
+    });
+
+    engine.register_fn("add_video", |parent: &mut NodeHandle, path: &str| {
+         let vid_node = VideoNode::new(path);
+         let mut d = parent.director.lock().unwrap();
+         let id = d.add_node(Box::new(vid_node));
+         d.add_child(parent.id, id);
+         NodeHandle { director: parent.director.clone(), id }
     });
 
     engine.register_fn("add_text", |parent: &mut NodeHandle, props: rhai::Map| {
@@ -211,10 +319,10 @@ pub fn register_rhai_api(engine: &mut Engine) {
          }
     });
 
-    engine.register_fn("animate", |node: &mut NodeHandle, prop: &str, _start: f64, end: f64, dur: f64, ease: &str| {
+    engine.register_fn("animate", |node: &mut NodeHandle, prop: &str, start: f64, end: f64, dur: f64, ease: &str| {
         let mut d = node.director.lock().unwrap();
         if let Some(n) = d.get_node_mut(node.id) {
-             n.element.animate_property(prop, end as f32, dur, ease);
+             n.element.animate_property(prop, start as f32, end as f32, dur, ease);
         }
     });
 
@@ -246,7 +354,7 @@ pub fn register_rhai_api(engine: &mut Engine) {
     engine.register_fn("set_blur", |node: &mut NodeHandle, val: f64| {
          let mut d = node.director.lock().unwrap();
          if let Some(n) = d.get_node_mut(node.id) {
-             n.element.animate_property("blur", val as f32, 0.0, "linear");
+             n.element.animate_property("blur", val as f32, val as f32, 0.0, "linear");
          }
     });
 }

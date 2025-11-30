@@ -4,6 +4,7 @@ use crate::element::{Element, Color, TextSpan};
 use crate::animation::{Animated, EasingType};
 use cosmic_text::{Buffer, FontSystem, Metrics, SwashCache, Attrs, AttrsList, Shaping, Weight, Style as CosmicStyle, Family};
 use std::sync::{Arc, Mutex};
+use std::fmt;
 // Video imports
 use crate::video_wrapper::{Decoder, Time};
 
@@ -116,14 +117,14 @@ impl Element for BoxNode {
         }
     }
 
-    fn animate_property(&mut self, property: &str, target: f32, duration: f64, easing: &str) {
+    fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str) {
         let ease_fn = parse_easing(easing);
         match property {
-            "opacity" => self.opacity.add_keyframe(target, duration, ease_fn),
-            "blur" => self.blur.add_keyframe(target, duration, ease_fn),
-            "shadow_blur" => self.shadow_blur.add_keyframe(target, duration, ease_fn),
-            "shadow_x" => self.shadow_offset_x.add_keyframe(target, duration, ease_fn),
-            "shadow_y" => self.shadow_offset_y.add_keyframe(target, duration, ease_fn),
+            "opacity" => self.opacity.add_segment(start, target, duration, ease_fn),
+            "blur" => self.blur.add_segment(start, target, duration, ease_fn),
+            "shadow_blur" => self.shadow_blur.add_segment(start, target, duration, ease_fn),
+            "shadow_x" => self.shadow_offset_x.add_segment(start, target, duration, ease_fn),
+            "shadow_y" => self.shadow_offset_y.add_segment(start, target, duration, ease_fn),
             _ => {}
         }
     }
@@ -256,10 +257,10 @@ impl Element for TextNode {
         }
     }
 
-    fn animate_property(&mut self, property: &str, target: f32, duration: f64, easing: &str) {
+    fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str) {
         let ease_fn = parse_easing(easing);
         match property {
-            "font_size" | "size" => self.default_font_size.add_keyframe(target, duration, ease_fn),
+            "font_size" | "size" => self.default_font_size.add_segment(start, target, duration, ease_fn),
             _ => {}
         }
     }
@@ -317,15 +318,16 @@ impl Element for ImageNode {
         }
     }
 
-    fn animate_property(&mut self, property: &str, target: f32, duration: f64, easing: &str) {
+    fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str) {
         let ease_fn = parse_easing(easing);
         if property == "opacity" {
-            self.opacity.add_keyframe(target, duration, ease_fn);
+            self.opacity.add_segment(start, target, duration, ease_fn);
         }
     }
 }
 
 // --- Video Node ---
+#[derive(Debug)]
 pub struct VideoNode {
     decoder: Mutex<Option<Decoder>>,
     pub opacity: Animated<f32>,
@@ -439,10 +441,10 @@ impl Element for VideoNode {
          }
     }
 
-    fn animate_property(&mut self, property: &str, target: f32, duration: f64, easing: &str) {
+    fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str) {
          let ease_fn = parse_easing(easing);
          if property == "opacity" {
-             self.opacity.add_keyframe(target, duration, ease_fn);
+             self.opacity.add_segment(start, target, duration, ease_fn);
          }
     }
 }

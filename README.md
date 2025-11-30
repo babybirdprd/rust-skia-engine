@@ -71,24 +71,38 @@ Elements are added to a Scene or a container Box. They support a subset of CSS-l
 // Add a Flexbox Container
 let box = scene.add_box(#{
     bg_color: "#FFFFFF",
-    // Layout props (implicit via Taffy defaults for now)
+    // Layout props
+    width: "100%",       // or 500.0, "auto"
+    height: 500.0,
+    flex_direction: "column", // row, column, row_reverse, column_reverse
+    align_items: "center",    // center, start, end, stretch
+    justify_content: "center", // center, start, end, space_between...
+    padding: 20.0,
+    margin: 10.0,
+    flex_grow: 1.0
 });
 
 // Add Text (Uses Cosmic-Text for shaping)
 let text = box.add_text(#{
     content: "Hello World"
 });
+
+// Add Image
+let img = box.add_image("assets/image.png");
+
+// Add Video
+let vid = box.add_video("assets/video.mp4");
 ```
 
 ### 3. Animation
 Any numeric property can be animated using keyframes.
 
 ```rust
-// .animate(property, target_value, duration, easing)
+// .animate(property, start_value, target_value, duration, easing)
 // Easing: "linear", "ease_in", "ease_out", "bounce_out"
 
-text.animate("size", 100.0, 2.0, "bounce_out");
-text.animate("opacity", 0.0, 1.0, "linear");
+text.animate("size", 20.0, 100.0, 2.0, "bounce_out");
+text.animate("opacity", 0.0, 1.0, 1.0, "linear");
 ```
 
 ### 4. Effects

@@ -71,7 +71,7 @@ pub trait Element: std::fmt::Debug {
     fn render(&self, canvas: &Canvas, layout_rect: Rect, opacity: f32);
 
     // 4. Animation Interface
-    fn animate_property(&mut self, property: &str, target: f32, duration: f64, easing: &str);
+    fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str);
 
     // 5. Rich Text Interface
     fn set_rich_text(&mut self, _spans: Vec<TextSpan>) {}

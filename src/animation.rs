@@ -68,6 +68,19 @@ where T: Copy + keyframe::CanTween + Default
         self.sequence.duration()
     }
 
+    pub fn add_segment(&mut self, start: T, target: T, duration: f64, easing: EasingType) {
+        if self.sequence.duration() == 0.0 {
+             // If no animation exists yet, treat start as the initial value
+             // But we must preserve the structure.
+             // Self::new creates a sequence with one keyframe at t=0.
+             *self = Self::new(start);
+        } else {
+             // If animation exists, we jump to 'start' immediately at the current end time
+             self.add_keyframe(start, 0.0, EasingType::Linear);
+        }
+        self.add_keyframe(target, duration, easing);
+    }
+
     pub fn update(&mut self, time: f64) {
         self.sequence.advance_to(time);
         self.current_value = self.sequence.now();
