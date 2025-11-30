@@ -25,6 +25,12 @@ impl EasingFunction for EasingType {
     }
 }
 
+impl EasingType {
+    pub fn eval(&self, x: f32) -> f32 {
+        self.y(x as f64) as f32
+    }
+}
+
 #[derive(Clone)]
 pub struct Animated<T>
 where T: Copy + keyframe::CanTween + Default

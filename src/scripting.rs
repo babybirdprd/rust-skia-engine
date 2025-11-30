@@ -1,5 +1,5 @@
 use rhai::{Engine, Map};
-use crate::director::{Director, NodeId, TimelineItem, PathAnimationState};
+use crate::director::{Director, NodeId, TimelineItem, PathAnimationState, Transition, TransitionType};
 use crate::node::{BoxNode, TextNode, ImageNode, VideoNode};
 use crate::element::{Color, TextSpan, GradientConfig};
 use crate::animation::{Animated, EasingType};
@@ -23,6 +23,7 @@ pub struct SceneHandle {
     pub root_id: NodeId,
     pub start_time: f64,
     pub duration: f64,
+    pub audio_tracks: Vec<usize>,
 }
 
 /// Handle to a specific Node in the scene graph.
@@ -311,6 +312,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
             start_time,
             duration,
             z_index: 0,
+            audio_tracks: Vec::new(),
         };
         d.timeline.push(item);
 
@@ -319,6 +321,63 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
             root_id: id,
             start_time,
             duration,
+            audio_tracks: Vec::new(),
+        }
+    });
+
+    engine.register_fn("add_transition", |movie: &mut MovieHandle, from: SceneHandle, to: SceneHandle, type_str: &str, duration: f64, easing_str: &str| {
+        let mut d = movie.director.lock().unwrap();
+
+        // Find indices
+        let from_idx = d.timeline.iter().position(|i| i.scene_root == from.root_id);
+        let to_idx = d.timeline.iter().position(|i| i.scene_root == to.root_id);
+
+        if let (Some(f_idx), Some(t_idx)) = (from_idx, to_idx) {
+             // Ripple Left Logic
+             // We shift 'to' scene and all subsequent scenes (index >= t_idx) left by duration.
+
+             for i in t_idx..d.timeline.len() {
+                 d.timeline[i].start_time -= duration;
+
+                 // Sync Audio
+                 let audio_ids = d.timeline[i].audio_tracks.clone();
+                 for track_id in audio_ids {
+                     if let Some(track) = d.audio_mixer.get_track_mut(track_id) {
+                         track.start_time -= duration;
+                     }
+                 }
+             }
+
+             let kind = match type_str {
+                 "fade" => TransitionType::Fade,
+                 "slide_left" | "slide-left" => TransitionType::SlideLeft,
+                 "slide_right" | "slide-right" => TransitionType::SlideRight,
+                 "wipe_left" | "wipe-left" => TransitionType::WipeLeft,
+                 "wipe_right" | "wipe-right" => TransitionType::WipeRight,
+                 "circle_open" | "circle-open" => TransitionType::CircleOpen,
+                 _ => TransitionType::Fade,
+             };
+
+             let easing = match easing_str {
+                 "linear" => EasingType::Linear,
+                 "ease_in" => EasingType::EaseIn,
+                 "ease_out" => EasingType::EaseOut,
+                 "ease_in_out" => EasingType::EaseInOut,
+                 _ => EasingType::Linear,
+             };
+
+             let start_time = d.timeline[t_idx].start_time;
+
+             let transition = Transition {
+                 from_scene_idx: f_idx,
+                 to_scene_idx: t_idx,
+                 start_time,
+                 duration,
+                 kind,
+                 easing
+             };
+
+             d.transitions.push(transition);
         }
     });
 
@@ -513,6 +572,15 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
             .unwrap_or_else(|e| { eprintln!("Audio error: {}", e); Vec::new() });
 
         let id = d.add_scene_audio(samples, scene.start_time, scene.duration);
+
+        // Update SceneHandle tracking
+        scene.audio_tracks.push(id);
+
+        // Update Director TimelineItem tracking
+        if let Some(item) = d.timeline.iter_mut().find(|i| i.scene_root == scene.root_id) {
+            item.audio_tracks.push(id);
+        }
+
         AudioTrackHandle { director: scene.director.clone(), id }
     });
 

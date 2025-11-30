@@ -1,7 +1,7 @@
 use crate::element::Element;
 // use rayon::prelude::*; // Rayon disabled due to Taffy !Send
 use skia_safe::{Path, PathMeasure};
-use crate::animation::Animated;
+use crate::animation::{Animated, EasingType};
 use crate::AssetLoader;
 use crate::audio::{AudioMixer, AudioTrack};
 use std::sync::Arc;
@@ -57,6 +57,27 @@ pub struct TimelineItem {
     pub start_time: f64,
     pub duration: f64,
     pub z_index: i32,
+    pub audio_tracks: Vec<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub enum TransitionType {
+    Fade,
+    SlideLeft,
+    SlideRight,
+    WipeLeft,
+    WipeRight,
+    CircleOpen,
+}
+
+#[derive(Clone)]
+pub struct Transition {
+    pub from_scene_idx: usize,
+    pub to_scene_idx: usize,
+    pub start_time: f64,
+    pub duration: f64,
+    pub kind: TransitionType,
+    pub easing: EasingType,
 }
 
 /// The central engine state.
@@ -65,6 +86,8 @@ pub struct Director {
     pub nodes: Vec<Option<SceneNode>>,
     /// The timeline of scenes.
     pub timeline: Vec<TimelineItem>,
+    /// Transitions
+    pub transitions: Vec<Transition>,
     /// Output width in pixels.
     pub width: i32,
     /// Output height in pixels.
@@ -87,6 +110,7 @@ impl Director {
         Self {
             nodes: Vec::new(),
             timeline: Vec::new(),
+            transitions: Vec::new(),
             width,
             height,
             fps,

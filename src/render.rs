@@ -1,9 +1,9 @@
 use anyhow::Result;
 use std::path::PathBuf;
-use crate::director::{Director, TimelineItem};
+use crate::director::{Director, TimelineItem, TransitionType};
 use crate::layout::LayoutEngine;
 use crate::audio::load_audio_bytes;
-use skia_safe::{ColorType, AlphaType, ColorSpace};
+use skia_safe::{ColorType, AlphaType, ColorSpace, RuntimeEffect, Data, runtime_effect::ChildPtr};
 use crate::video_wrapper::{Encoder, EncoderSettings, Locator, Time};
 use ndarray::Array3;
 
@@ -90,20 +90,64 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
         let frame_start_time = i as f64 / fps as f64;
         let shutter_start_time = frame_start_time - (shutter_duration / 2.0);
 
+        let render_at_time = |director: &mut Director, layout_engine: &mut LayoutEngine, time: f64, canvas: &skia_safe::Canvas| {
+             director.update(time);
+             layout_engine.compute_layout(director, time);
+
+             canvas.clear(skia_safe::Color::BLACK);
+
+             // Check transition
+             let transition = director.transitions.iter().find(|t| time >= t.start_time && time < t.start_time + t.duration).cloned();
+
+             // Collect items. Need indices to match with transition.
+             let mut items: Vec<(usize, TimelineItem)> = director.timeline.iter().cloned().enumerate()
+                 .filter(|(_, item)| time >= item.start_time && time < item.start_time + item.duration)
+                 .collect();
+             items.sort_by_key(|(_, item)| item.z_index);
+
+             if let Some(trans) = transition {
+                 let mut drawn_transition = false;
+
+                 for (idx, item) in items {
+                     if idx == trans.from_scene_idx || idx == trans.to_scene_idx {
+                         if !drawn_transition {
+                             let info = skia_safe::ImageInfo::new(
+                                (director.width, director.height),
+                                ColorType::RGBA8888,
+                                AlphaType::Premul,
+                                Some(ColorSpace::new_srgb()),
+                             );
+
+                             if let (Some(mut surf_a), Some(mut surf_b)) = (skia_safe::surfaces::raster(&info, None, None), skia_safe::surfaces::raster(&info, None, None)) {
+                                 // Render A & B
+                                 if let (Some(item_a), Some(item_b)) = (director.timeline.get(trans.from_scene_idx), director.timeline.get(trans.to_scene_idx)) {
+                                     render_recursive(director, item_a.scene_root, surf_a.canvas(), 1.0);
+                                     render_recursive(director, item_b.scene_root, surf_b.canvas(), 1.0);
+
+                                     let img_a = surf_a.image_snapshot();
+                                     let img_b = surf_b.image_snapshot();
+
+                                     let progress = ((time - trans.start_time) / trans.duration).clamp(0.0, 1.0) as f32;
+                                     let val = trans.easing.eval(progress);
+
+                                     draw_transition(canvas, &img_a, &img_b, val, &trans.kind, director.width, director.height);
+                                 }
+                             }
+                             drawn_transition = true;
+                         }
+                     } else {
+                         render_recursive(director, item.scene_root, canvas, 1.0);
+                     }
+                 }
+             } else {
+                 for (_, item) in items {
+                     render_recursive(director, item.scene_root, canvas, 1.0);
+                 }
+             }
+        };
+
         if samples == 1 {
-            director.update(frame_start_time);
-            layout_engine.compute_layout(director, frame_start_time);
-
-            surface.canvas().clear(skia_safe::Color::BLACK);
-
-            let mut items: Vec<&TimelineItem> = director.timeline.iter()
-                .filter(|item| frame_start_time >= item.start_time && frame_start_time < item.start_time + item.duration)
-                .collect();
-            items.sort_by_key(|item| item.z_index);
-
-            for item in items {
-                 render_recursive(director, item.scene_root, surface.canvas(), 1.0);
-            }
+            render_at_time(director, &mut layout_engine, frame_start_time, surface.canvas());
         } else {
              let scratch_surface = accumulation_surface.as_mut().unwrap();
 
@@ -115,19 +159,8 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
                  };
                  let sample_time = shutter_start_time + t_offset;
 
-                 director.update(sample_time);
-                 layout_engine.compute_layout(director, sample_time);
-
-                 scratch_surface.canvas().clear(skia_safe::Color::BLACK);
-
-                 let mut items: Vec<&TimelineItem> = director.timeline.iter()
-                    .filter(|item| sample_time >= item.start_time && sample_time < item.start_time + item.duration)
-                    .collect();
-                 items.sort_by_key(|item| item.z_index);
-
-                 for item in items {
-                      render_recursive(director, item.scene_root, scratch_surface.canvas(), 1.0);
-                 }
+                 // Clear handled by render_at_time
+                 render_at_time(director, &mut layout_engine, sample_time, scratch_surface.canvas());
 
                  let weight = 1.0 / (s as f32 + 1.0);
                  let mut paint = skia_safe::Paint::default();
@@ -196,5 +229,135 @@ fn render_recursive(director: &Director, node_id: crate::director::NodeId, canva
          node.element.render(canvas, local_rect, parent_opacity, &mut draw_children);
 
          canvas.restore();
+    }
+}
+
+fn get_transition_shader(kind: &TransitionType) -> &'static str {
+    match kind {
+        TransitionType::Fade => r#"
+            uniform shader imageA;
+            uniform shader imageB;
+            uniform float progress;
+            half4 main(float2 p) {
+                half4 colorA = imageA.eval(p);
+                half4 colorB = imageB.eval(p);
+                return mix(colorA, colorB, progress);
+            }
+        "#,
+        TransitionType::SlideLeft => r#"
+            uniform shader imageA;
+            uniform shader imageB;
+            uniform float progress;
+            uniform float2 resolution;
+            half4 main(float2 p) {
+                float x_offset = resolution.x * progress;
+                if (p.x < (resolution.x - x_offset)) {
+                    return imageA.eval(float2(p.x + x_offset, p.y));
+                } else {
+                    return imageB.eval(float2(p.x - (resolution.x - x_offset), p.y));
+                }
+            }
+        "#,
+        TransitionType::SlideRight => r#"
+            uniform shader imageA;
+            uniform shader imageB;
+            uniform float progress;
+            uniform float2 resolution;
+            half4 main(float2 p) {
+                float x_offset = resolution.x * progress;
+                if (p.x > x_offset) {
+                    return imageA.eval(float2(p.x - x_offset, p.y));
+                } else {
+                    return imageB.eval(float2(p.x - x_offset + resolution.x, p.y));
+                }
+            }
+        "#,
+        TransitionType::WipeLeft => r#"
+            uniform shader imageA;
+            uniform shader imageB;
+            uniform float progress;
+            uniform float2 resolution;
+            half4 main(float2 p) {
+                 float boundary = resolution.x * (1.0 - progress);
+                 if (p.x < boundary) {
+                     return imageA.eval(p);
+                 } else {
+                     return imageB.eval(p);
+                 }
+            }
+        "#,
+        TransitionType::WipeRight => r#"
+            uniform shader imageA;
+            uniform shader imageB;
+            uniform float progress;
+            uniform float2 resolution;
+            half4 main(float2 p) {
+                 float boundary = resolution.x * progress;
+                 if (p.x > boundary) {
+                     return imageA.eval(p);
+                 } else {
+                     return imageB.eval(p);
+                 }
+            }
+        "#,
+        TransitionType::CircleOpen => r#"
+            uniform shader imageA;
+            uniform shader imageB;
+            uniform float progress;
+            uniform float2 resolution;
+            half4 main(float2 p) {
+                float2 center = resolution / 2.0;
+                float max_radius = length(resolution);
+                float current_radius = max_radius * progress;
+                float dist = distance(p, center);
+                if (dist < current_radius) {
+                    return imageB.eval(p);
+                } else {
+                    return imageA.eval(p);
+                }
+            }
+        "#,
+    }
+}
+
+fn draw_transition(
+    canvas: &skia_safe::Canvas,
+    img_a: &skia_safe::Image,
+    img_b: &skia_safe::Image,
+    progress: f32,
+    kind: &TransitionType,
+    width: i32,
+    height: i32,
+) {
+    let sksl = get_transition_shader(kind);
+    let result = RuntimeEffect::make_for_shader(sksl, None);
+    if let Ok(effect) = result {
+         let mut uniform_bytes = Vec::new();
+         uniform_bytes.extend_from_slice(&progress.to_le_bytes());
+
+         match kind {
+             TransitionType::Fade => {},
+             _ => {
+                 uniform_bytes.extend_from_slice(&(width as f32).to_le_bytes());
+                 uniform_bytes.extend_from_slice(&(height as f32).to_le_bytes());
+             }
+         }
+
+         let uniforms_data = Data::new_copy(&uniform_bytes);
+
+         let shader_a = img_a.to_shader(None, skia_safe::SamplingOptions::default(), None).unwrap();
+         let shader_b = img_b.to_shader(None, skia_safe::SamplingOptions::default(), None).unwrap();
+
+         let children = [ChildPtr::Shader(shader_a), ChildPtr::Shader(shader_b)];
+
+         if let Some(shader) = effect.make_shader(uniforms_data, &children, None) {
+             let mut paint = skia_safe::Paint::default();
+             paint.set_shader(Some(shader));
+             canvas.draw_rect(skia_safe::Rect::from_wh(width as f32, height as f32), &paint);
+         } else {
+             eprintln!("Failed to make shader");
+         }
+    } else {
+        eprintln!("Shader compilation error: {:?}", result.err());
     }
 }
