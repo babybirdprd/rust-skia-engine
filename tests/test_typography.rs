@@ -22,7 +22,6 @@ fn test_text_fit_shrink() {
         fill_gradient: None,
     }];
 
-    // Create TextNode manually
     let fs = director.font_system.clone();
     let sc = director.swash_cache.clone();
     let mut text_node = TextNode::new(spans, fs, sc);
@@ -30,16 +29,13 @@ fn test_text_fit_shrink() {
     text_node.min_size = 10.0;
     text_node.max_size = 100.0;
 
-    // Set explicit layout style on the text node itself
     text_node.style.size = taffy::geometry::Size {
         width: taffy::style::Dimension::length(200.0),
         height: taffy::style::Dimension::length(50.0)
     };
 
-    // Add to director
     let id = director.add_node(Box::new(text_node));
 
-    // Make it scene root
     let item = director_engine::director::TimelineItem {
         scene_root: id,
         start_time: 0.0,
@@ -49,12 +45,9 @@ fn test_text_fit_shrink() {
     };
     director.timeline.push(item);
 
-    // Render frame 0 (trigger layout and post_layout)
-    // We don't need a real canvas, just trigger the pipeline
     let mut surface = skia_safe::surfaces::raster_n32_premul((1920, 1080)).unwrap();
     director_engine::render::render_frame(&mut director, 0.0, surface.canvas());
 
-    // Check font size
     let node = director.get_node(id).unwrap();
     let text_node = node.element.as_any().downcast_ref::<TextNode>().unwrap();
 
@@ -89,12 +82,11 @@ fn test_render_video_output() {
     text_node.min_size = 20.0;
     text_node.max_size = 200.0;
 
-    // Constrain width to force shrink
+    // Constrain size so Text-to-Fit works
     text_node.style.size = taffy::geometry::Size {
         width: taffy::style::Dimension::length(800.0),
-        height: taffy::style::Dimension::auto(),
+        height: taffy::style::Dimension::length(300.0),
     };
-    // Center it
     text_node.style.margin = taffy::geometry::Rect {
         left: taffy::style::LengthPercentageAuto::auto(),
         right: taffy::style::LengthPercentageAuto::auto(),
@@ -102,7 +94,6 @@ fn test_render_video_output() {
         bottom: taffy::style::LengthPercentageAuto::auto(),
     };
 
-    // Add Shadow
     text_node.shadow = Some(director_engine::element::TextShadow {
         color: director_engine::element::Color::new(0.0, 0.0, 0.0, 0.5),
         blur: 10.0,
@@ -114,14 +105,13 @@ fn test_render_video_output() {
     let item = director_engine::director::TimelineItem {
         scene_root: id,
         start_time: 0.0,
-        duration: 2.0, // 2 seconds
+        duration: 2.0,
         z_index: 0,
         audio_tracks: vec![],
     };
     director.timeline.push(item);
 
     let out_path = std::path::PathBuf::from("typography_test.mp4");
-    // Ensure we delete old one
     if out_path.exists() {
         std::fs::remove_file(&out_path).unwrap();
     }
