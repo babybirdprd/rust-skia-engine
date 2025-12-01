@@ -347,6 +347,27 @@ impl Element for BoxNode {
             _ => {}
         }
     }
+
+    fn animate_property_spring(&mut self, property: &str, start: Option<f32>, target: f32, config: crate::animation::SpringConfig) {
+        let apply = |anim: &mut crate::animation::Animated<f32>| {
+             if let Some(s) = start {
+                 anim.add_spring_with_start(s, target, config);
+             } else {
+                 anim.add_spring(target, config);
+             }
+        };
+
+        match property {
+            "opacity" => apply(&mut self.opacity),
+            "blur" => apply(&mut self.blur),
+            "shadow_blur" => apply(&mut self.shadow_blur),
+            "shadow_x" => apply(&mut self.shadow_offset_x),
+            "shadow_y" => apply(&mut self.shadow_offset_y),
+            "border_radius" => apply(&mut self.border_radius),
+            "border_width" => apply(&mut self.border_width),
+            _ => {}
+        }
+    }
 }
 
 // --- Text Node ---
@@ -739,6 +760,19 @@ impl Element for TextNode {
         }
     }
 
+    fn animate_property_spring(&mut self, property: &str, start: Option<f32>, target: f32, config: crate::animation::SpringConfig) {
+        match property {
+            "font_size" | "size" => {
+                if let Some(s) = start {
+                    self.default_font_size.add_spring_with_start(s, target, config);
+                } else {
+                    self.default_font_size.add_spring(target, config);
+                }
+            },
+            _ => {}
+        }
+    }
+
     fn set_rich_text(&mut self, spans: Vec<TextSpan>) {
         self.spans = spans;
         self.init_buffer();
@@ -822,6 +856,16 @@ impl Element for ImageNode {
         let ease_fn = parse_easing(easing);
         if property == "opacity" {
             self.opacity.add_segment(start, target, duration, ease_fn);
+        }
+    }
+
+    fn animate_property_spring(&mut self, property: &str, start: Option<f32>, target: f32, config: crate::animation::SpringConfig) {
+        if property == "opacity" {
+            if let Some(s) = start {
+                self.opacity.add_spring_with_start(s, target, config);
+            } else {
+                self.opacity.add_spring(target, config);
+            }
         }
     }
 }
@@ -944,6 +988,16 @@ impl Element for VideoNode {
          let ease_fn = parse_easing(easing);
          if property == "opacity" {
              self.opacity.add_segment(start, target, duration, ease_fn);
+         }
+    }
+
+    fn animate_property_spring(&mut self, property: &str, start: Option<f32>, target: f32, config: crate::animation::SpringConfig) {
+         if property == "opacity" {
+             if let Some(s) = start {
+                 self.opacity.add_spring_with_start(s, target, config);
+             } else {
+                 self.opacity.add_spring(target, config);
+             }
          }
     }
 }

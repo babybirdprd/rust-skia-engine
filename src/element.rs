@@ -112,6 +112,11 @@ pub trait Element: std::fmt::Debug + ElementClone {
     // 4. Animation Interface
     fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str);
 
+    fn animate_property_spring(&mut self, _property: &str, _start: Option<f32>, _target: f32, _config: crate::animation::SpringConfig) {
+        // Default: No-op or Warn
+        // eprintln!("Warning: Spring animation not supported for this property or element.");
+    }
+
     // 5. Rich Text Interface
     fn set_rich_text(&mut self, _spans: Vec<TextSpan>) {}
     fn modify_text_spans(&mut self, _f: &dyn Fn(&mut Vec<TextSpan>)) {}

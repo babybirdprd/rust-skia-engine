@@ -219,6 +219,15 @@ fn parse_text_style(map: &rhai::Map, span: &mut TextSpan) {
     }
 }
 
+fn parse_spring_config(map: &rhai::Map) -> crate::animation::SpringConfig {
+    let mut config = crate::animation::SpringConfig::default();
+    if let Some(v) = map.get("stiffness").and_then(|v| v.as_float().ok()) { config.stiffness = v as f32; }
+    if let Some(v) = map.get("damping").and_then(|v| v.as_float().ok()) { config.damping = v as f32; }
+    if let Some(v) = map.get("mass").and_then(|v| v.as_float().ok()) { config.mass = v as f32; }
+    if let Some(v) = map.get("velocity").and_then(|v| v.as_float().ok()) { config.velocity = v as f32; }
+    config
+}
+
 fn parse_layout_style(props: &rhai::Map, style: &mut Style) {
     let to_dim = |v: &rhai::Dynamic| -> Option<Dimension> {
         if let Ok(f) = v.as_float() { Some(Dimension::length(f as f32)) }
@@ -872,6 +881,54 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
                  "translate_y" | "y" => n.transform.translate_y.add_segment(start as f32, end as f32, dur, ease_fn),
                  _ => {
                      n.element.animate_property(prop, start as f32, end as f32, dur, ease);
+                 }
+             }
+        }
+    });
+
+    engine.register_fn("animate", |node: &mut NodeHandle, prop: &str, end: f64, config: rhai::Map| {
+        let mut d = node.director.lock().unwrap();
+        let spring_conf = parse_spring_config(&config);
+
+        if let Some(n) = d.get_node_mut(node.id) {
+             match prop {
+                 "scale" => {
+                     n.transform.scale_x.add_spring(end as f32, spring_conf);
+                     n.transform.scale_y.add_spring(end as f32, spring_conf);
+                 },
+                 "scale_x" => n.transform.scale_x.add_spring(end as f32, spring_conf),
+                 "scale_y" => n.transform.scale_y.add_spring(end as f32, spring_conf),
+                 "rotation" => n.transform.rotation.add_spring(end as f32, spring_conf),
+                 "skew_x" => n.transform.skew_x.add_spring(end as f32, spring_conf),
+                 "skew_y" => n.transform.skew_y.add_spring(end as f32, spring_conf),
+                 "translate_x" | "x" => n.transform.translate_x.add_spring(end as f32, spring_conf),
+                 "translate_y" | "y" => n.transform.translate_y.add_spring(end as f32, spring_conf),
+                 _ => {
+                     n.element.animate_property_spring(prop, None, end as f32, spring_conf);
+                 }
+             }
+        }
+    });
+
+    engine.register_fn("animate", |node: &mut NodeHandle, prop: &str, start: f64, end: f64, config: rhai::Map| {
+        let mut d = node.director.lock().unwrap();
+        let spring_conf = parse_spring_config(&config);
+
+        if let Some(n) = d.get_node_mut(node.id) {
+             match prop {
+                 "scale" => {
+                     n.transform.scale_x.add_spring_with_start(start as f32, end as f32, spring_conf);
+                     n.transform.scale_y.add_spring_with_start(start as f32, end as f32, spring_conf);
+                 },
+                 "scale_x" => n.transform.scale_x.add_spring_with_start(start as f32, end as f32, spring_conf),
+                 "scale_y" => n.transform.scale_y.add_spring_with_start(start as f32, end as f32, spring_conf),
+                 "rotation" => n.transform.rotation.add_spring_with_start(start as f32, end as f32, spring_conf),
+                 "skew_x" => n.transform.skew_x.add_spring_with_start(start as f32, end as f32, spring_conf),
+                 "skew_y" => n.transform.skew_y.add_spring_with_start(start as f32, end as f32, spring_conf),
+                 "translate_x" | "x" => n.transform.translate_x.add_spring_with_start(start as f32, end as f32, spring_conf),
+                 "translate_y" | "y" => n.transform.translate_y.add_spring_with_start(start as f32, end as f32, spring_conf),
+                 _ => {
+                     n.element.animate_property_spring(prop, Some(start as f32), end as f32, spring_conf);
                  }
              }
         }
