@@ -2,6 +2,7 @@ use director_engine::{scripting::{register_rhai_api, MovieHandle}, DefaultAssetL
 use rhai::Engine;
 use std::sync::Arc;
 use std::fs;
+use std::path::PathBuf;
 
 #[test]
 fn test_kitchen_sink_layout() {
@@ -14,7 +15,7 @@ fn test_kitchen_sink_layout() {
     let result = engine.eval::<MovieHandle>(&script).expect("Script failed");
     let mut director = result.director.lock().unwrap();
 
-    // Trigger Layout
+    // Trigger Layout (Frame 0)
     let mut surface = skia_safe::surfaces::raster_n32_premul((1920, 1080)).unwrap();
     director_engine::render::render_frame(&mut director, 0.0, surface.canvas());
 
@@ -46,4 +47,14 @@ fn test_kitchen_sink_layout() {
     // Width is 90% of 864 = ~777.6
     let expected_vid_width = 864.0 * 0.9;
     assert!((vid_container.layout_rect.width() - expected_vid_width).abs() < 10.0);
+
+    // Render Video Output (Kitchen Sink)
+    // This generates the actual MP4 file to satisfy the showcase requirement.
+    let out_path = PathBuf::from("kitchen_sink.mp4");
+    if out_path.exists() {
+        fs::remove_file(&out_path).unwrap();
+    }
+
+    println!("Rendering kitchen_sink.mp4 (this may take a moment)...");
+    director_engine::render::render_export(&mut director, out_path, None, None).expect("Export failed");
 }

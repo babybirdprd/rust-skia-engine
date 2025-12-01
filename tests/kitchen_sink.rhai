@@ -1,4 +1,5 @@
-let movie = new_director(1920, 1080, 30);
+// Initialize with Export mode for high-quality rendering
+let movie = new_director(1920, 1080, 30, #{ mode: "export" });
 let scene = movie.add_scene(10.0);
 
 let root = scene.add_box(#{
