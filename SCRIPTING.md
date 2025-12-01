@@ -180,3 +180,38 @@ Enable cinematic motion blur for smoother animations.
 // 8 samples per frame, 180 degree shutter angle
 movie.configure_motion_blur(8, 180.0);
 ```
+
+## 10. Visual Effects
+
+You can apply stacked visual effects to any node using `apply_effect`.
+
+### Built-in Presets
+```rust
+let image = scene.add_image("photo.jpg");
+
+// Apply basic color corrections
+image.apply_effect("grayscale");
+image.apply_effect("contrast", 1.2); // Increase contrast by 20%
+image.apply_effect("brightness", 0.1); // Brighten
+image.apply_effect("blur", 10.0); // Gaussian Blur
+```
+
+### Custom Shaders (SkSL)
+You can apply custom Runtime Shaders using SkSL (Skia Shading Language). The shader must define a `main` function and can access the content via `image`.
+
+```rust
+image.apply_effect("shader", #{
+    code: `
+        uniform shader image;
+        uniform float intensity;
+
+        half4 main(float2 p) {
+            half4 c = image.eval(p);
+            return half4(c.r * intensity, c.g, c.b, c.a);
+        }
+    `,
+    uniforms: #{
+        intensity: 2.0
+    }
+});
+```
