@@ -992,6 +992,7 @@ impl Element for TextNode {
 pub struct ImageNode {
     pub image: Option<Image>,
     pub opacity: Animated<f32>,
+    pub style: Style,
 }
 
 impl ImageNode {
@@ -1000,6 +1001,7 @@ impl ImageNode {
         Self {
             image,
             opacity: Animated::new(1.0),
+            style: Style::DEFAULT,
         }
     }
 }
@@ -1009,7 +1011,11 @@ impl Element for ImageNode {
     fn as_any_mut(&mut self) -> &mut dyn Any { self }
 
     fn layout_style(&self) -> Style {
-        Style::DEFAULT
+        self.style.clone()
+    }
+
+    fn set_layout_style(&mut self, style: Style) {
+        self.style = style;
     }
 
     fn update(&mut self, time: f64) -> bool {
@@ -1054,6 +1060,7 @@ impl Element for ImageNode {
 #[derive(Debug)]
 pub struct VideoNode {
     pub opacity: Animated<f32>,
+    pub style: Style,
     current_frame: Mutex<Option<(f64, Image)>>,
 
     decoder: Option<AsyncDecoder>,
@@ -1075,6 +1082,7 @@ impl Clone for VideoNode {
 
         Self {
             opacity: self.opacity.clone(),
+            style: self.style.clone(),
             current_frame: Mutex::new(None),
             decoder,
             render_mode: self.render_mode,
@@ -1095,6 +1103,7 @@ impl VideoNode {
 
         Self {
             opacity: Animated::new(1.0),
+            style: Style::DEFAULT,
             current_frame: Mutex::new(None),
             decoder,
             render_mode: mode,
@@ -1108,7 +1117,11 @@ impl Element for VideoNode {
     fn as_any_mut(&mut self) -> &mut dyn Any { self }
 
     fn layout_style(&self) -> Style {
-        Style::DEFAULT
+        self.style.clone()
+    }
+
+    fn set_layout_style(&mut self, style: Style) {
+        self.style = style;
     }
 
     fn update(&mut self, time: f64) -> bool {
