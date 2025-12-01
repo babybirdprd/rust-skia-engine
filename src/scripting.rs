@@ -661,6 +661,28 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          NodeHandle { director: parent.director.clone(), id }
     });
 
+    engine.register_fn("add_svg", |scene: &mut SceneHandle, path: &str| {
+         let mut d = scene.director.lock().unwrap();
+         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+
+         let vec_node = VectorNode::new(&bytes);
+         let id = d.add_node(Box::new(vec_node));
+         d.add_child(scene.root_id, id);
+         NodeHandle { director: scene.director.clone(), id }
+    });
+
+    engine.register_fn("add_svg", |scene: &mut SceneHandle, path: &str, props: rhai::Map| {
+         let mut d = scene.director.lock().unwrap();
+         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+
+         let mut vec_node = VectorNode::new(&bytes);
+         parse_layout_style(&props, &mut vec_node.style);
+
+         let id = d.add_node(Box::new(vec_node));
+         d.add_child(scene.root_id, id);
+         NodeHandle { director: scene.director.clone(), id }
+    });
+
     engine.register_fn("add_image", |parent: &mut NodeHandle, path: &str, props: rhai::Map| {
          let mut d = parent.director.lock().unwrap();
          let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
