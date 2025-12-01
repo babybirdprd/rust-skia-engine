@@ -5,6 +5,7 @@ use crate::video_wrapper::RenderMode;
 use crate::element::{Element, Color, TextSpan, GradientConfig};
 use crate::animation::{Animated, EasingType};
 use crate::tokens::DesignSystem;
+use crate::lottie::{LottieNode, LoopMode};
 use crate::AssetLoader;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
@@ -648,6 +649,57 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          let id = d.add_node(Box::new(img_node));
          d.add_child(parent.id, id);
          NodeHandle { director: parent.director.clone(), id }
+    });
+
+    engine.register_fn("add_lottie", |scene: &mut SceneHandle, path: &str| {
+        let mut d = scene.director.lock().unwrap();
+        let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+
+        if let Some(lottie_node) = LottieNode::new(bytes) {
+             let id = d.add_node(Box::new(lottie_node));
+             d.add_child(scene.root_id, id);
+             NodeHandle { director: scene.director.clone(), id }
+        } else {
+             eprintln!("Failed to load Lottie: {}", path);
+             NodeHandle { director: scene.director.clone(), id: 0 }
+        }
+    });
+
+    engine.register_fn("add_lottie", |scene: &mut SceneHandle, path: &str, props: rhai::Map| {
+        let mut d = scene.director.lock().unwrap();
+        let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+
+        if let Some(mut lottie_node) = LottieNode::new(bytes) {
+             if let Some(loop_v) = props.get("loop").and_then(|v| v.as_bool().ok()) {
+                 if !loop_v { lottie_node.loop_mode = LoopMode::PlayOnce; }
+             }
+             if let Some(speed_v) = props.get("speed").and_then(|v| v.as_float().ok()) {
+                 lottie_node.speed = crate::animation::Animated::new(speed_v as f32);
+             }
+
+             parse_layout_style(&props, &mut lottie_node.style);
+
+             let id = d.add_node(Box::new(lottie_node));
+             d.add_child(scene.root_id, id);
+             NodeHandle { director: scene.director.clone(), id }
+        } else {
+             eprintln!("Failed to load Lottie: {}", path);
+             NodeHandle { director: scene.director.clone(), id: 0 }
+        }
+    });
+
+    engine.register_fn("set_lottie_loop", |node: &mut NodeHandle, loop_mode: &str| {
+        let mut d = node.director.lock().unwrap();
+        if let Some(n) = d.get_node_mut(node.id) {
+             if let Some(lottie) = n.element.as_any_mut().downcast_mut::<LottieNode>() {
+                 lottie.loop_mode = match loop_mode {
+                     "loop" => LoopMode::Loop,
+                     "once" | "play_once" => LoopMode::PlayOnce,
+                     "ping_pong" | "pingpong" => LoopMode::PingPong,
+                     _ => LoopMode::Loop,
+                 };
+             }
+        }
     });
 
     engine.register_fn("add_video", |parent: &mut NodeHandle, path: &str| {
