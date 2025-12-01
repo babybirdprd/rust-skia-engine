@@ -569,7 +569,7 @@ impl Element for TextNode {
                 let mut best_size = self.min_size;
 
                 // Binary search for optimal font size (5 steps)
-                for _ in 0..5 {
+                for i in 0..5 {
                     let mid = (low + high) / 2.0;
 
                     buf.set_metrics(&mut fs, Metrics::new(mid, mid * 1.2));
@@ -577,9 +577,14 @@ impl Element for TextNode {
                     buf.shape_until_scroll(&mut fs, false);
 
                     // Check bounds (simplified height check)
-                    let content_height = buf.layout_runs().count() as f32 * (mid * 1.2);
+                    let count = buf.layout_runs().count();
+                    let content_height = count as f32 * (mid * 1.2);
 
-                    if content_height <= target_height {
+                    let fits = content_height <= target_height;
+                    println!("  [{}] size={:.2} count={} h={:.2} target={:.2} fits={}",
+                        i, mid, count, content_height, target_height, fits);
+
+                    if fits {
                         best_size = mid;
                         low = mid;
                     } else {
