@@ -4,48 +4,52 @@ use director_engine::render::render_export;
 use director_engine::DefaultAssetLoader;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::env;
+use std::fs;
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() < 2 {
+        println!("Usage: director-engine <script.rhai> [output.mp4]");
+        return;
+    }
+
+    let script_path = PathBuf::from(&args[1]);
+    let output_path = if args.len() >= 3 {
+        PathBuf::from(&args[2])
+    } else {
+        let mut p = script_path.clone();
+        p.set_extension("mp4");
+        // If script was examples/showcase.rhai, output is examples/showcase.mp4
+        // To keep repo clean, maybe default to root?
+        // But following standard behavior (ffmpeg etc), same dir is expected.
+        // I will force it to be in the current directory if not specified to avoid cluttering examples?
+        // No, let's just default to replacing extension.
+        p
+    };
+
     println!("Initializing Director Engine...");
+    println!("Script: {:?}", script_path);
+    println!("Output: {:?}", output_path);
+
+    let script = match fs::read_to_string(&script_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading script file: {}", e);
+            return;
+        }
+    };
 
     let mut engine = Engine::new();
     register_rhai_api(&mut engine, Arc::new(DefaultAssetLoader));
 
-    // Use ## as delimiter because script contains " (double quote) and # (hash)
-    let script = r##"
-        let movie = new_director(1080, 1920, 30);
-        let scene = movie.add_scene(5.0);
-
-        let box = scene.add_box(#{
-            bg_color: "#FF0000",
-            // Layout properties
-            width: "80%",
-            height: "50%",
-            flex_direction: "column",
-            align_items: "center",
-            justify_content: "center"
-        });
-
-        let text = box.add_text(#{
-            content: "Hello World"
-        });
-
-        // Animate size from 20.0 to 100.0 over 2.0 seconds
-        text.animate("size", 20.0, 100.0, 2.0, "bounce_out");
-
-        // Example of adding Image and Video (ensure files exist)
-        // box.add_image("assets/logo.png");
-        // box.add_video("assets/clip.mp4");
-
-        movie
-    "##;
-
-    match engine.eval::<director_engine::scripting::MovieHandle>(script) {
+    match engine.eval::<director_engine::scripting::MovieHandle>(&script) {
         Ok(movie) => {
             println!("Script evaluated successfully. Starting render...");
             let mut director = movie.director.lock().unwrap();
-            match render_export(&mut director, PathBuf::from("output.mp4"), None, None) {
-                Ok(_) => println!("Render complete: output.mp4"),
+            match render_export(&mut director, output_path, None, None) {
+                Ok(_) => println!("Render complete."),
                 Err(e) => println!("Render failed: {}", e),
             }
         },

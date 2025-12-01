@@ -128,7 +128,7 @@ fn build_effect_filter(effects: &[EffectType], shader_cache: Option<&Arc<Mutex<H
                     if let Some(effect) = cache.get(sksl) {
                          let mut builder = RuntimeShaderBuilder::new(effect.clone());
                          for (key, val) in uniforms {
-                             builder.set_uniform_float(key, &[val.current_value]);
+                             let _ = builder.set_uniform_float(key, &[val.current_value]);
                          }
                          // "image" is the standard name for the input texture in SkSL for ImageFilters
                          current_filter = image_filters::runtime_shader(&builder, "image", current_filter);
@@ -194,8 +194,29 @@ impl Element for EffectNode {
         canvas.restore();
     }
 
-    fn animate_property(&mut self, _property: &str, _start: f32, _target: f32, _duration: f64, _easing: &str) {
-        // Not implemented for individual effect properties via string key yet
+    fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str) {
+        let ease_fn = parse_easing(easing);
+        for effect in &mut self.effects {
+             if let EffectType::RuntimeShader { uniforms, .. } = effect {
+                 if let Some(anim) = uniforms.get_mut(property) {
+                     anim.add_segment(start, target, duration, ease_fn);
+                 }
+             }
+        }
+    }
+
+    fn animate_property_spring(&mut self, property: &str, start: Option<f32>, target: f32, config: crate::animation::SpringConfig) {
+        for effect in &mut self.effects {
+             if let EffectType::RuntimeShader { uniforms, .. } = effect {
+                 if let Some(anim) = uniforms.get_mut(property) {
+                     if let Some(s) = start {
+                         anim.add_spring_with_start(s, target, config);
+                     } else {
+                         anim.add_spring(target, config);
+                     }
+                 }
+             }
+        }
     }
 }
 
@@ -665,6 +686,9 @@ impl Element for TextNode {
                                  }
                              }
                          }
+
+                         // Apply per-glyph opacity to shadow
+                         shadow_paint.set_alpha_f(opacity * alpha);
 
                          // Shadow shouldn't disappear if alpha is 0?
                          // Usually shadow alpha * text alpha.

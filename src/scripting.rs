@@ -66,7 +66,7 @@ fn extract_outer_style(source: &Style) -> Style {
     }
 }
 
-fn apply_effect_to_node(d: &mut Director, node_id: NodeId, effect: EffectType) {
+fn apply_effect_to_node(d: &mut Director, node_id: NodeId, effect: EffectType) -> NodeId {
     let parent_id_opt = d.get_node(node_id).and_then(|n| n.parent);
 
     let mut wrapper_style = Style::default();
@@ -92,7 +92,7 @@ fn apply_effect_to_node(d: &mut Director, node_id: NodeId, effect: EffectType) {
              comp_node.style.inset = taffy::geometry::Rect::auto();
         }
     } else {
-        return;
+        return node_id; // Failure fallback
     }
 
     let effect_node = EffectNode {
@@ -116,6 +116,8 @@ fn apply_effect_to_node(d: &mut Director, node_id: NodeId, effect: EffectType) {
             item.scene_root = effect_id;
         }
     }
+
+    effect_id
 }
 
 /// Helper to parse hex strings like "#RRGGBB" or "#RGB"
@@ -419,6 +421,12 @@ pub fn create_theme_api(system: DesignSystem) -> Module {
 pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
     let theme_module = create_theme_api(DesignSystem::new());
     engine.register_static_module("theme", theme_module.into());
+
+    // Randomness
+    engine.register_fn("rand_float", |min: f64, max: f64| {
+        use rand::Rng;
+        rand::thread_rng().gen_range(min..max)
+    });
 
     // 1. Director/Movie
     engine.register_type_with_name::<MovieHandle>("Movie");
@@ -1134,7 +1142,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
     });
 
     // Effects
-    engine.register_fn("apply_effect", |node: &mut NodeHandle, name: &str| {
+    engine.register_fn("apply_effect", |node: &mut NodeHandle, name: &str| -> NodeHandle {
         let mut d = node.director.lock().unwrap();
         let effect = match name {
             "grayscale" => Some(EffectType::ColorMatrix(vec![
@@ -1159,11 +1167,14 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         };
 
         if let Some(eff) = effect {
-            apply_effect_to_node(&mut d, node.id, eff);
+            let id = apply_effect_to_node(&mut d, node.id, eff);
+            NodeHandle { director: node.director.clone(), id }
+        } else {
+            NodeHandle { director: node.director.clone(), id: node.id }
         }
     });
 
-    engine.register_fn("apply_effect", |node: &mut NodeHandle, name: &str, val: f64| {
+    engine.register_fn("apply_effect", |node: &mut NodeHandle, name: &str, val: f64| -> NodeHandle {
         let mut d = node.director.lock().unwrap();
         let val = val as f32;
         let effect = match name {
@@ -1191,11 +1202,14 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         };
 
         if let Some(eff) = effect {
-            apply_effect_to_node(&mut d, node.id, eff);
+            let id = apply_effect_to_node(&mut d, node.id, eff);
+            NodeHandle { director: node.director.clone(), id }
+        } else {
+             NodeHandle { director: node.director.clone(), id: node.id }
         }
     });
 
-    engine.register_fn("apply_effect", |node: &mut NodeHandle, name: &str, map: rhai::Map| {
+    engine.register_fn("apply_effect", |node: &mut NodeHandle, name: &str, map: rhai::Map| -> NodeHandle {
         let mut d = node.director.lock().unwrap();
         if name == "shader" {
              if let Some(code) = map.get("code").and_then(|v| v.clone().into_string().ok()) {
@@ -1212,8 +1226,10 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
                      sksl: code,
                      uniforms
                  };
-                 apply_effect_to_node(&mut d, node.id, effect);
+                 let id = apply_effect_to_node(&mut d, node.id, effect);
+                 return NodeHandle { director: node.director.clone(), id };
              }
         }
+        NodeHandle { director: node.director.clone(), id: node.id }
     });
 }

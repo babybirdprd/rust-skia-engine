@@ -26,6 +26,7 @@ rayon = "1.10"
 tempfile = "3.23.0"
 crossbeam-channel = "0.5.15"
 unicode-segmentation = "1.10"
+rand = "0.8"
 
 [features]
 default = ["video-rs"]
