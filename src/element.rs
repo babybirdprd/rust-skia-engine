@@ -116,6 +116,10 @@ pub trait Element: std::fmt::Debug + ElementClone {
     // 1. Layout Phase
     fn layout_style(&self) -> Style;
 
+    fn set_layout_style(&mut self, _style: Style) {
+        // Default no-op
+    }
+
     // 2. Update Phase
     fn update(&mut self, time: f64) -> bool;
 

@@ -455,7 +455,11 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         let mut d = movie.director.lock().unwrap();
         let start_time = d.timeline.last().map(|i| i.start_time + i.duration).unwrap_or(0.0);
 
-        let root = BoxNode::new();
+        let mut root = BoxNode::new();
+        root.style.size = taffy::geometry::Size {
+            width: Dimension::percent(1.0),
+            height: Dimension::percent(1.0),
+        };
         let id = d.add_node(Box::new(root));
 
         let item = TimelineItem {
@@ -649,12 +653,37 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          NodeHandle { director: parent.director.clone(), id }
     });
 
+    engine.register_fn("add_image", |parent: &mut NodeHandle, path: &str, props: rhai::Map| {
+         let mut d = parent.director.lock().unwrap();
+         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+
+         let mut img_node = ImageNode::new(bytes);
+         parse_layout_style(&props, &mut img_node.style);
+
+         let id = d.add_node(Box::new(img_node));
+         d.add_child(parent.id, id);
+         NodeHandle { director: parent.director.clone(), id }
+    });
+
     engine.register_fn("add_video", |parent: &mut NodeHandle, path: &str| {
          let mut d = parent.director.lock().unwrap();
          let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
          let mode = d.render_mode;
 
          let vid_node = VideoNode::new(bytes, mode);
+         let id = d.add_node(Box::new(vid_node));
+         d.add_child(parent.id, id);
+         NodeHandle { director: parent.director.clone(), id }
+    });
+
+    engine.register_fn("add_video", |parent: &mut NodeHandle, path: &str, props: rhai::Map| {
+         let mut d = parent.director.lock().unwrap();
+         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let mode = d.render_mode;
+
+         let mut vid_node = VideoNode::new(bytes, mode);
+         parse_layout_style(&props, &mut vid_node.style);
+
          let id = d.add_node(Box::new(vid_node));
          d.add_child(parent.id, id);
          NodeHandle { director: parent.director.clone(), id }
@@ -847,6 +876,10 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
     engine.register_fn("set_style", |node: &mut NodeHandle, style: rhai::Map| {
          let mut d = node.director.lock().unwrap();
          if let Some(n) = d.get_node_mut(node.id) {
+             let mut layout_style = n.element.layout_style();
+             parse_layout_style(&style, &mut layout_style);
+             n.element.set_layout_style(layout_style);
+
              n.element.modify_text_spans(&|spans| {
                  for span in spans {
                      parse_text_style(&style, span);
