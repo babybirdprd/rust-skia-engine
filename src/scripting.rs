@@ -1,6 +1,6 @@
 use rhai::{Engine, Map, Module};
 use crate::director::{Director, NodeId, TimelineItem, PathAnimationState, Transition, TransitionType};
-use crate::node::{BoxNode, TextNode, ImageNode, VideoNode, CompositionNode, EffectType, EffectNode};
+use crate::node::{BoxNode, TextNode, ImageNode, VideoNode, CompositionNode, EffectType, EffectNode, VectorNode};
 use crate::video_wrapper::RenderMode;
 use crate::element::{Element, Color, TextSpan, GradientConfig, TextFit, TextShadow};
 use crate::animation::{Animated, EasingType};
@@ -669,6 +669,28 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          parse_layout_style(&props, &mut img_node.style);
 
          let id = d.add_node(Box::new(img_node));
+         d.add_child(parent.id, id);
+         NodeHandle { director: parent.director.clone(), id }
+    });
+
+    engine.register_fn("add_svg", |parent: &mut NodeHandle, path: &str| {
+         let mut d = parent.director.lock().unwrap();
+         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+
+         let vec_node = VectorNode::new(&bytes);
+         let id = d.add_node(Box::new(vec_node));
+         d.add_child(parent.id, id);
+         NodeHandle { director: parent.director.clone(), id }
+    });
+
+    engine.register_fn("add_svg", |parent: &mut NodeHandle, path: &str, props: rhai::Map| {
+         let mut d = parent.director.lock().unwrap();
+         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+
+         let mut vec_node = VectorNode::new(&bytes);
+         parse_layout_style(&props, &mut vec_node.style);
+
+         let id = d.add_node(Box::new(vec_node));
          d.add_child(parent.id, id);
          NodeHandle { director: parent.director.clone(), id }
     });
