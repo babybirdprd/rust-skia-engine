@@ -86,6 +86,19 @@ pub struct TextSpan {
     pub fill_gradient: Option<GradientConfig>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum TextFit {
+    None,
+    Shrink,
+}
+
+#[derive(Clone, Debug)]
+pub struct TextShadow {
+    pub color: Color,
+    pub blur: f32,
+    pub offset: (f32, f32),
+}
+
 pub trait ElementClone {
     fn clone_box(&self) -> Box<dyn Element>;
 }
@@ -105,6 +118,9 @@ pub trait Element: std::fmt::Debug + ElementClone {
 
     // 2. Update Phase
     fn update(&mut self, time: f64) -> bool;
+
+    // 2.5 Post Layout Phase
+    fn post_layout(&mut self, _rect: Rect) {}
 
     // 3. Render Phase
     fn render(&self, canvas: &Canvas, layout_rect: Rect, opacity: f32, draw_children: &mut dyn FnMut(&Canvas));

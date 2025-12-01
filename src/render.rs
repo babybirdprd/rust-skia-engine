@@ -93,6 +93,7 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
         let render_at_time = |director: &mut Director, layout_engine: &mut LayoutEngine, time: f64, canvas: &skia_safe::Canvas| {
              director.update(time);
              layout_engine.compute_layout(director, time);
+             director.run_post_layout(time);
 
              canvas.clear(skia_safe::Color::BLACK);
 
@@ -426,6 +427,7 @@ pub fn render_frame(director: &mut Director, time: f64, canvas: &skia_safe::Canv
      let mut layout_engine = LayoutEngine::new();
      director.update(time);
      layout_engine.compute_layout(director, time);
+     director.run_post_layout(time);
 
      canvas.clear(skia_safe::Color::BLACK);
 

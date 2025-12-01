@@ -25,7 +25,7 @@ pub enum VideoResponse {
 #[cfg(feature = "video-rs")]
 mod real {
     use super::*;
-    use video_rs::{Time, Location as Locator};
+    pub use video_rs::{Time, Location as Locator};
     use video_rs::ffmpeg::{self, format, codec, software, ChannelLayout};
     use ndarray::Array3;
 
@@ -264,7 +264,7 @@ mod real {
             };
 
             thread::spawn(move || {
-                let mut decoder = match video_rs::Decoder::new(&path) {
+                let mut decoder = match video_rs::Decoder::new(path.clone()) {
                     Ok(d) => d,
                     Err(e) => {
                         let _ = resp_tx.send(VideoResponse::Error(e.to_string()));
@@ -330,9 +330,10 @@ mod real {
                                  if shape.len() == 3 && shape[2] >= 3 {
                                      let h = shape[0] as u32;
                                      let w = shape[1] as u32;
+                                     let channels = shape[2];
                                      let (bytes, _) = frame.into_raw_vec_and_offset();
 
-                                     let data = if shape[2] == 3 {
+                                     let data = if channels == 3 {
                                          let mut rgba = Vec::with_capacity((w * h * 4) as usize);
                                          for chunk in bytes.chunks(3) {
                                              rgba.extend_from_slice(chunk);

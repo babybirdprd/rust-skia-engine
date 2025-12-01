@@ -8,6 +8,7 @@ use crate::video_wrapper::RenderMode;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use skia_safe::RuntimeEffect;
+use cosmic_text::{FontSystem, SwashCache, fontdb::Source};
 
 /// A unique identifier for a node in the scene graph.
 pub type NodeId = usize;
@@ -146,11 +147,22 @@ pub struct Director {
     pub audio_mixer: AudioMixer,
     /// Global shader cache
     pub shader_cache: Arc<Mutex<HashMap<String, RuntimeEffect>>>,
+    /// Shared Font System (initialized once)
+    pub font_system: Arc<Mutex<FontSystem>>,
+    /// Shared Swash Cache (initialized once)
+    pub swash_cache: Arc<Mutex<SwashCache>>,
 }
 
 impl Director {
     /// Creates a new Director instance.
     pub fn new(width: i32, height: i32, fps: u32, asset_loader: Arc<dyn AssetLoader>, render_mode: RenderMode) -> Self {
+        let mut font_system = FontSystem::new();
+        // Load fallback font if available
+        if let Some(bytes) = asset_loader.load_font_fallback() {
+             let mut db = font_system.db_mut();
+             db.load_font_source(Source::Binary(Arc::new(bytes)));
+        }
+
         Self {
             nodes: Vec::new(),
             timeline: Vec::new(),
@@ -164,6 +176,8 @@ impl Director {
             asset_loader,
             audio_mixer: AudioMixer::new(48000),
             shader_cache: Arc::new(Mutex::new(HashMap::new())),
+            font_system: Arc::new(Mutex::new(font_system)),
+            swash_cache: Arc::new(Mutex::new(SwashCache::new())),
         }
     }
 
@@ -335,6 +349,16 @@ impl Director {
                              node.transform.translate_y.current_value = p.y;
                         }
                     }
+                }
+            }
+        }
+    }
+
+    pub fn run_post_layout(&mut self, global_time: f64) {
+        for node_opt in self.nodes.iter_mut() {
+            if let Some(node) = node_opt {
+                if (node.last_visit_time - global_time).abs() < 0.0001 {
+                    node.element.post_layout(node.layout_rect);
                 }
             }
         }

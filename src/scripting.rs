@@ -2,13 +2,12 @@ use rhai::{Engine, Map, Module};
 use crate::director::{Director, NodeId, TimelineItem, PathAnimationState, Transition, TransitionType};
 use crate::node::{BoxNode, TextNode, ImageNode, VideoNode, CompositionNode, EffectType, EffectNode};
 use crate::video_wrapper::RenderMode;
-use crate::element::{Element, Color, TextSpan, GradientConfig};
+use crate::element::{Element, Color, TextSpan, GradientConfig, TextFit, TextShadow};
 use crate::animation::{Animated, EasingType};
 use crate::tokens::DesignSystem;
 use crate::AssetLoader;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
-use cosmic_text::{FontSystem, SwashCache};
 use skia_safe::Path;
 use taffy::style::{Style, FlexDirection, AlignItems, JustifyContent, Dimension, LengthPercentage, LengthPercentageAuto};
 use taffy::geometry::Rect;
@@ -662,8 +661,9 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
     });
 
     engine.register_fn("add_text", |parent: &mut NodeHandle, props: rhai::Map| {
-         let fs = Arc::new(Mutex::new(FontSystem::new()));
-         let sc = Arc::new(Mutex::new(SwashCache::new()));
+         let mut d = parent.director.lock().unwrap();
+         let fs = d.font_system.clone();
+         let sc = d.swash_cache.clone();
 
          let spans = if let Some(c) = props.get("content") {
              parse_spans_from_dynamic(c.clone())
@@ -671,9 +671,52 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
              Vec::new()
          };
 
-         let text_node = TextNode::new(spans, fs, sc);
+         let mut text_node = TextNode::new(spans, fs, sc);
 
-         let mut d = parent.director.lock().unwrap();
+         parse_layout_style(&props, &mut text_node.style);
+
+         if let Some(s) = props.get("fit").and_then(|v| v.clone().into_string().ok()) {
+             text_node.fit_mode = match s.as_str() {
+                 "shrink" => TextFit::Shrink,
+                 _ => TextFit::None
+             };
+         }
+         if let Some(v) = props.get("min_size").and_then(|v| v.as_float().ok()) {
+             text_node.min_size = v as f32;
+         }
+         if let Some(v) = props.get("max_size").and_then(|v| v.as_float().ok()) {
+             text_node.max_size = v as f32;
+         }
+
+         // Shadow parsing
+         let mut has_shadow = false;
+         let mut shadow = TextShadow {
+             color: Color::BLACK,
+             blur: 0.0,
+             offset: (0.0, 0.0)
+         };
+         if let Some(c) = props.get("text_shadow_color").and_then(|v| v.clone().into_string().ok()) {
+             if let Some(col) = parse_hex_color(&c) {
+                 shadow.color = col;
+                 has_shadow = true;
+             }
+         }
+         if let Some(v) = props.get("text_shadow_blur").and_then(|v| v.as_float().ok()) {
+             shadow.blur = v as f32;
+             has_shadow = true;
+         }
+         if let Some(v) = props.get("text_shadow_x").and_then(|v| v.as_float().ok()) {
+             shadow.offset.0 = v as f32;
+             has_shadow = true;
+         }
+         if let Some(v) = props.get("text_shadow_y").and_then(|v| v.as_float().ok()) {
+             shadow.offset.1 = v as f32;
+             has_shadow = true;
+         }
+         if has_shadow {
+             text_node.shadow = Some(shadow);
+         }
+
          let id = d.add_node(Box::new(text_node));
          d.add_child(parent.id, id);
 
@@ -681,8 +724,9 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
     });
 
     engine.register_fn("add_text", |scene: &mut SceneHandle, props: rhai::Map| {
-         let fs = Arc::new(Mutex::new(FontSystem::new()));
-         let sc = Arc::new(Mutex::new(SwashCache::new()));
+         let mut d = scene.director.lock().unwrap();
+         let fs = d.font_system.clone();
+         let sc = d.swash_cache.clone();
 
          let spans = if let Some(c) = props.get("content") {
              parse_spans_from_dynamic(c.clone())
@@ -690,9 +734,52 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
              Vec::new()
          };
 
-         let text_node = TextNode::new(spans, fs, sc);
+         let mut text_node = TextNode::new(spans, fs, sc);
 
-         let mut d = scene.director.lock().unwrap();
+         parse_layout_style(&props, &mut text_node.style);
+
+         if let Some(s) = props.get("fit").and_then(|v| v.clone().into_string().ok()) {
+             text_node.fit_mode = match s.as_str() {
+                 "shrink" => TextFit::Shrink,
+                 _ => TextFit::None
+             };
+         }
+         if let Some(v) = props.get("min_size").and_then(|v| v.as_float().ok()) {
+             text_node.min_size = v as f32;
+         }
+         if let Some(v) = props.get("max_size").and_then(|v| v.as_float().ok()) {
+             text_node.max_size = v as f32;
+         }
+
+         // Shadow parsing
+         let mut has_shadow = false;
+         let mut shadow = TextShadow {
+             color: Color::BLACK,
+             blur: 0.0,
+             offset: (0.0, 0.0)
+         };
+         if let Some(c) = props.get("text_shadow_color").and_then(|v| v.clone().into_string().ok()) {
+             if let Some(col) = parse_hex_color(&c) {
+                 shadow.color = col;
+                 has_shadow = true;
+             }
+         }
+         if let Some(v) = props.get("text_shadow_blur").and_then(|v| v.as_float().ok()) {
+             shadow.blur = v as f32;
+             has_shadow = true;
+         }
+         if let Some(v) = props.get("text_shadow_x").and_then(|v| v.as_float().ok()) {
+             shadow.offset.0 = v as f32;
+             has_shadow = true;
+         }
+         if let Some(v) = props.get("text_shadow_y").and_then(|v| v.as_float().ok()) {
+             shadow.offset.1 = v as f32;
+             has_shadow = true;
+         }
+         if has_shadow {
+             text_node.shadow = Some(shadow);
+         }
+
          let id = d.add_node(Box::new(text_node));
          d.add_child(scene.root_id, id);
 
@@ -753,6 +840,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          let mut d = node.director.lock().unwrap();
          if let Some(n) = d.get_node_mut(node.id) {
              n.element.set_rich_text(spans);
+             // Trigger layout dirty flag? TextNode handles it in set_rich_text
          }
     });
 

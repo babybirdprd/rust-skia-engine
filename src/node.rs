@@ -5,7 +5,7 @@ use skia_safe::{
     RuntimeEffect, image_filters, color_filters, runtime_effect::RuntimeShaderBuilder, ColorMatrix
 };
 use taffy::style::Style;
-use crate::element::{Element, Color, TextSpan};
+use crate::element::{Element, Color, TextSpan, TextFit, TextShadow};
 use crate::animation::{Animated, EasingType};
 use crate::director::Director;
 use crate::layout::LayoutEngine;
@@ -389,6 +389,15 @@ pub struct TextNode {
     // RFC 009
     pub animators: Vec<TextAnimator>,
     pub grapheme_starts: Vec<usize>, // Byte offsets of each grapheme start
+
+    // RFC 013: Advanced Typography
+    pub fit_mode: TextFit,
+    pub min_size: f32,
+    pub max_size: f32,
+    pub shadow: Option<TextShadow>,
+    pub dirty_layout: bool,
+    pub last_layout_rect: Rect,
+    pub style: Style,
 }
 
 impl Clone for TextNode {
@@ -402,6 +411,13 @@ impl Clone for TextNode {
             swash_cache: self.swash_cache.clone(),
             animators: self.animators.clone(),
             grapheme_starts: self.grapheme_starts.clone(),
+            fit_mode: self.fit_mode.clone(),
+            min_size: self.min_size,
+            max_size: self.max_size,
+            shadow: self.shadow.clone(),
+            dirty_layout: true,
+            last_layout_rect: Rect::default(),
+            style: self.style.clone(),
         }
     }
 }
@@ -411,6 +427,7 @@ impl fmt::Debug for TextNode {
         f.debug_struct("TextNode")
          .field("spans", &self.spans)
          .field("animators", &self.animators)
+         .field("fit_mode", &self.fit_mode)
          .finish()
     }
 }
@@ -426,6 +443,13 @@ impl TextNode {
             swash_cache,
             animators: Vec::new(),
             grapheme_starts: Vec::new(),
+            fit_mode: TextFit::None,
+            min_size: 10.0,
+            max_size: 200.0,
+            shadow: None,
+            dirty_layout: true,
+            last_layout_rect: Rect::default(),
+            style: Style::default(),
         };
         node.init_buffer();
         node
@@ -482,6 +506,8 @@ impl TextNode {
              .grapheme_indices(true)
              .map(|(i, _)| i)
              .collect();
+
+         self.dirty_layout = true;
     }
 
     fn build_span_ranges(&self) -> Vec<std::ops::Range<usize>> {
@@ -501,7 +527,7 @@ impl Element for TextNode {
     fn as_any_mut(&mut self) -> &mut dyn Any { self }
 
     fn layout_style(&self) -> Style {
-        Style::DEFAULT
+        self.style.clone()
     }
 
     fn update(&mut self, time: f64) -> bool {
@@ -524,6 +550,56 @@ impl Element for TextNode {
         true
     }
 
+    fn post_layout(&mut self, rect: Rect) {
+        if self.fit_mode == TextFit::None && !self.dirty_layout { return; }
+        if self.last_layout_rect == rect && !self.dirty_layout { return; }
+
+        self.last_layout_rect = rect;
+
+        if self.fit_mode == TextFit::Shrink {
+            let mut fs = self.font_system.lock().unwrap();
+            let mut buf_guard = self.buffer.lock().unwrap();
+
+            if let Some(buf) = buf_guard.as_mut() {
+                let target_width = rect.width();
+                let target_height = rect.height();
+
+                let mut low = self.min_size;
+                let mut high = self.max_size;
+                let mut best_size = self.min_size;
+
+                // Binary search for optimal font size (5 steps)
+                for _ in 0..5 {
+                    let mid = (low + high) / 2.0;
+
+                    buf.set_metrics(&mut fs, Metrics::new(mid, mid * 1.2));
+                    buf.set_size(&mut fs, Some(target_width), None);
+                    buf.shape_until_scroll(&mut fs, false);
+
+                    // Check bounds (simplified height check)
+                    let content_height = buf.layout_runs().count() as f32 * (mid * 1.2);
+
+                    if content_height <= target_height {
+                        best_size = mid;
+                        low = mid;
+                    } else {
+                        high = mid;
+                    }
+                }
+
+                // Apply best size
+                self.default_font_size.current_value = best_size;
+
+                // Final shape
+                buf.set_metrics(&mut fs, Metrics::new(best_size, best_size * 1.2));
+                buf.set_size(&mut fs, Some(target_width), Some(target_height));
+                buf.shape_until_scroll(&mut fs, false);
+            }
+        }
+
+        self.dirty_layout = false;
+    }
+
     fn render(&self, canvas: &Canvas, rect: Rect, opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) {
         let mut buf_guard = self.buffer.lock().unwrap();
         let _sc_guard = self.swash_cache.lock().unwrap();
@@ -531,8 +607,12 @@ impl Element for TextNode {
         if let Some(buffer) = buf_guard.as_mut() {
             let mut fs = self.font_system.lock().unwrap();
 
-            buffer.set_size(&mut fs, Some(rect.width()), Some(rect.height()));
-            buffer.shape_until_scroll(&mut fs, false);
+            // Ensure shaping is up to date if not using TextFit
+            // For TextFit, it was already shaped in post_layout
+            if self.fit_mode == TextFit::None {
+                buffer.set_size(&mut fs, Some(rect.width()), Some(rect.height()));
+                buffer.shape_until_scroll(&mut fs, false);
+            }
 
             let font_mgr = FontMgr::default();
             // Default font setup (fallback)
@@ -540,6 +620,102 @@ impl Element for TextNode {
             let font = skia_safe::Font::new(typeface, Some(self.default_font_size.current_value));
 
             let ranges = self.build_span_ranges();
+
+            // Pass 0: Text Shadows (Before Backgrounds so shadows don't occlude bg?)
+            // RFC says: "Shadow: Drawing the text blob with a blur filter and offset before the main draw."
+            // "Main draw" usually includes background + text.
+            // Actually, text shadow usually renders on top of background but behind text.
+            // I'll put it here.
+            if let Some(shadow) = &self.shadow {
+                 let mut shadow_paint = Paint::default();
+                 shadow_paint.set_color(shadow.color.to_skia());
+                 shadow_paint.set_image_filter(image_filters::blur(
+                    (shadow.blur, shadow.blur),
+                    TileMode::Decal,
+                    None, None
+                 ));
+                 shadow_paint.set_alpha_f(opacity); // Inherit opacity
+
+                 for run in buffer.layout_runs() {
+                     let origin_y = rect.top + run.line_y;
+                     let origin_x = rect.left;
+
+                     for glyph in run.glyphs.iter() {
+                         let grapheme_idx = match self.grapheme_starts.binary_search(&glyph.start) {
+                             Ok(i) => i,
+                             Err(i) => i.saturating_sub(1),
+                         };
+
+                         let mut offset_x = 0.0;
+                         let mut offset_y = 0.0;
+                         let mut rotation = 0.0;
+                         let mut scale = 1.0;
+                         let mut alpha = 1.0;
+
+                         for anim in &self.animators {
+                             if anim.range.contains(&grapheme_idx) {
+                                 let val = anim.animation.current_value;
+                                 match anim.property.as_str() {
+                                     "x" | "offset_x" => offset_x += val,
+                                     "y" | "offset_y" => offset_y += val,
+                                     "rotation" => rotation += val,
+                                     "scale" => scale *= val,
+                                     "opacity" => alpha *= val,
+                                     _ => {}
+                                 }
+                             }
+                         }
+
+                         // Shadow shouldn't disappear if alpha is 0?
+                         // Usually shadow alpha * text alpha.
+
+                         let span_idx = ranges.iter().position(|r| r.contains(&glyph.start)).unwrap_or(0);
+                         let span = &self.spans[span_idx];
+
+                         let size = span.font_size.unwrap_or(self.default_font_size.current_value);
+                         let mut typeface = font.typeface();
+                         if span.font_weight.is_some() || span.font_style.is_some() || span.font_family.is_some() {
+                             let mgr = FontMgr::default();
+                             let family = span.font_family.as_deref().unwrap_or("Sans Serif");
+                             let weight = span.font_weight.map(|w| SkWeight::from(w as i32)).unwrap_or(SkWeight::NORMAL);
+                             let slant = if span.font_style.as_deref() == Some("italic") { SkSlant::Italic } else { SkSlant::Upright };
+                             if let Some(tf) = mgr.match_family_style(family, FontStyle::new(weight, SkWidth::NORMAL, slant)) {
+                                 typeface = tf;
+                             }
+                         }
+                         let glyph_font = skia_safe::Font::new(typeface, Some(size));
+
+                         let mut builder = TextBlobBuilder::new();
+                         let glyph_id = glyph.glyph_id as u16;
+                         let blob_buffer = builder.alloc_run(&glyph_font, 1, (0.0, 0.0), None);
+                         blob_buffer[0] = glyph_id;
+
+                         if let Some(blob) = builder.make() {
+                             canvas.save();
+                             let x = origin_x + glyph.x;
+                             let y = origin_y + glyph.y;
+
+                             let mut bounds = [Rect::default(); 1];
+                             glyph_font.get_bounds(&[glyph_id], &mut bounds, None);
+                             let bound = bounds[0];
+                             let px = x + bound.center_x();
+                             let py = y + bound.center_y();
+
+                             canvas.translate((px, py));
+                             canvas.rotate(rotation, None);
+                             canvas.scale((scale, scale));
+                             canvas.translate((-px, -py));
+                             canvas.translate((offset_x, offset_y));
+
+                             // Shadow specific translation
+                             canvas.translate((shadow.offset.0, shadow.offset.1));
+
+                             canvas.draw_text_blob(&blob, (x, y), &shadow_paint);
+                             canvas.restore();
+                         }
+                     }
+                 }
+            }
 
             // Pass 1: Backgrounds (Unmodified)
             for (span_idx, span) in self.spans.iter().enumerate() {
@@ -586,7 +762,7 @@ impl Element for TextNode {
                 }
             }
 
-            // Pass 2: Text Glyphs (RFC 009)
+            // Pass 2: Text Glyphs (RFC 009 & 013)
             for run in buffer.layout_runs() {
                  let origin_y = rect.top + run.line_y;
                  let origin_x = rect.left;
@@ -755,7 +931,10 @@ impl Element for TextNode {
     fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str) {
         let ease_fn = parse_easing(easing);
         match property {
-            "font_size" | "size" => self.default_font_size.add_segment(start, target, duration, ease_fn),
+            "font_size" | "size" => {
+                self.default_font_size.add_segment(start, target, duration, ease_fn);
+                self.dirty_layout = true;
+            },
             _ => {}
         }
     }
@@ -768,6 +947,7 @@ impl Element for TextNode {
                 } else {
                     self.default_font_size.add_spring(target, config);
                 }
+                self.dirty_layout = true;
             },
             _ => {}
         }
@@ -1047,6 +1227,7 @@ impl Element for CompositionNode {
 
         let mut layout_engine = LayoutEngine::new();
         layout_engine.compute_layout(&mut d, comp_time);
+        d.run_post_layout(comp_time);
 
         true
     }
