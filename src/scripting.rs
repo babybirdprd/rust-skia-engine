@@ -1,12 +1,13 @@
 use rhai::{Engine, Map, Module};
 use crate::director::{Director, NodeId, TimelineItem, PathAnimationState, Transition, TransitionType};
-use crate::node::{BoxNode, TextNode, ImageNode, VideoNode, CompositionNode};
+use crate::node::{BoxNode, TextNode, ImageNode, VideoNode, CompositionNode, EffectType, EffectNode};
 use crate::video_wrapper::RenderMode;
-use crate::element::{Color, TextSpan, GradientConfig};
+use crate::element::{Element, Color, TextSpan, GradientConfig};
 use crate::animation::{Animated, EasingType};
 use crate::tokens::DesignSystem;
 use crate::AssetLoader;
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use cosmic_text::{FontSystem, SwashCache};
 use skia_safe::Path;
 use taffy::style::{Style, FlexDirection, AlignItems, JustifyContent, Dimension, LengthPercentage, LengthPercentageAuto};
@@ -40,6 +41,82 @@ pub struct NodeHandle {
 pub struct AudioTrackHandle {
     pub director: Arc<Mutex<Director>>,
     pub id: usize,
+}
+
+fn extract_outer_style(source: &Style) -> Style {
+    Style {
+        display: source.display,
+        position: source.position,
+        inset: source.inset,
+        size: source.size,
+        min_size: source.min_size,
+        max_size: source.max_size,
+        aspect_ratio: source.aspect_ratio,
+        margin: source.margin,
+        flex_grow: source.flex_grow,
+        flex_shrink: source.flex_shrink,
+        flex_basis: source.flex_basis,
+        align_self: source.align_self,
+        justify_self: source.justify_self,
+        grid_row: source.grid_row.clone(),
+        grid_column: source.grid_column.clone(),
+        padding: taffy::geometry::Rect::zero(),
+        border: taffy::geometry::Rect::zero(),
+        gap: taffy::geometry::Size::zero(),
+        ..Default::default()
+    }
+}
+
+fn apply_effect_to_node(d: &mut Director, node_id: NodeId, effect: EffectType) {
+    let parent_id_opt = d.get_node(node_id).and_then(|n| n.parent);
+
+    let mut wrapper_style = Style::default();
+
+    // Modify target node style (Steal & Fill)
+    if let Some(node) = d.get_node_mut(node_id) {
+        let original_style = node.element.layout_style();
+        wrapper_style = extract_outer_style(&original_style);
+
+        if let Some(box_node) = node.element.as_any_mut().downcast_mut::<BoxNode>() {
+             box_node.style.size = taffy::geometry::Size { width: Dimension::percent(1.0), height: Dimension::percent(1.0) };
+             box_node.style.margin = taffy::geometry::Rect::zero();
+             box_node.style.flex_grow = 0.0;
+             box_node.style.flex_shrink = 1.0;
+             box_node.style.position = taffy::style::Position::Relative;
+             box_node.style.inset = taffy::geometry::Rect::auto();
+        } else if let Some(comp_node) = node.element.as_any_mut().downcast_mut::<CompositionNode>() {
+             comp_node.style.size = taffy::geometry::Size { width: Dimension::percent(1.0), height: Dimension::percent(1.0) };
+             comp_node.style.margin = taffy::geometry::Rect::zero();
+             comp_node.style.flex_grow = 0.0;
+             comp_node.style.flex_shrink = 1.0;
+             comp_node.style.position = taffy::style::Position::Relative;
+             comp_node.style.inset = taffy::geometry::Rect::auto();
+        }
+    } else {
+        return;
+    }
+
+    let effect_node = EffectNode {
+        effects: vec![effect],
+        style: wrapper_style,
+        shader_cache: d.shader_cache.clone(),
+    };
+
+    let effect_id = d.add_node(Box::new(effect_node));
+
+    if let Some(parent_id) = parent_id_opt {
+        d.remove_child(parent_id, node_id);
+        d.add_child(parent_id, effect_id);
+    }
+
+    d.add_child(effect_id, node_id);
+
+    // Update Root if needed
+    for item in &mut d.timeline {
+        if item.scene_root == node_id {
+            item.scene_root = effect_id;
+        }
+    }
 }
 
 /// Helper to parse hex strings like "#RRGGBB" or "#RGB"
@@ -875,6 +952,90 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
                  _ => EasingType::Linear,
              };
              t.volume.add_segment(start as f32, end as f32, dur, ease_fn);
+        }
+    });
+
+    // Effects
+    engine.register_fn("apply_effect", |node: &mut NodeHandle, name: &str| {
+        let mut d = node.director.lock().unwrap();
+        let effect = match name {
+            "grayscale" => Some(EffectType::ColorMatrix(vec![
+                0.2126, 0.7152, 0.0722, 0.0, 0.0,
+                0.2126, 0.7152, 0.0722, 0.0, 0.0,
+                0.2126, 0.7152, 0.0722, 0.0, 0.0,
+                0.0,    0.0,    0.0,    1.0, 0.0,
+            ])),
+            "sepia" => Some(EffectType::ColorMatrix(vec![
+                0.393, 0.769, 0.189, 0.0, 0.0,
+                0.349, 0.686, 0.168, 0.0, 0.0,
+                0.272, 0.534, 0.131, 0.0, 0.0,
+                0.0,   0.0,   0.0,   1.0, 0.0,
+            ])),
+            "invert" => Some(EffectType::ColorMatrix(vec![
+                -1.0,  0.0,  0.0, 0.0, 1.0,
+                0.0, -1.0,  0.0, 0.0, 1.0,
+                0.0,  0.0, -1.0, 0.0, 1.0,
+                0.0,  0.0,  0.0, 1.0, 0.0,
+            ])),
+            _ => None
+        };
+
+        if let Some(eff) = effect {
+            apply_effect_to_node(&mut d, node.id, eff);
+        }
+    });
+
+    engine.register_fn("apply_effect", |node: &mut NodeHandle, name: &str, val: f64| {
+        let mut d = node.director.lock().unwrap();
+        let val = val as f32;
+        let effect = match name {
+            "contrast" => {
+                let t = (1.0 - val) / 2.0;
+                Some(EffectType::ColorMatrix(vec![
+                    val, 0.0, 0.0, 0.0, t,
+                    0.0, val, 0.0, 0.0, t,
+                    0.0, 0.0, val, 0.0, t,
+                    0.0, 0.0, 0.0, 1.0, 0.0,
+                ]))
+            },
+            "brightness" => {
+                Some(EffectType::ColorMatrix(vec![
+                    1.0, 0.0, 0.0, 0.0, val,
+                    0.0, 1.0, 0.0, 0.0, val,
+                    0.0, 0.0, 1.0, 0.0, val,
+                    0.0, 0.0, 0.0, 1.0, 0.0,
+                ]))
+            },
+            "blur" => {
+                Some(EffectType::Blur(Animated::new(val)))
+            },
+            _ => None
+        };
+
+        if let Some(eff) = effect {
+            apply_effect_to_node(&mut d, node.id, eff);
+        }
+    });
+
+    engine.register_fn("apply_effect", |node: &mut NodeHandle, name: &str, map: rhai::Map| {
+        let mut d = node.director.lock().unwrap();
+        if name == "shader" {
+             if let Some(code) = map.get("code").and_then(|v| v.clone().into_string().ok()) {
+                 let mut uniforms = HashMap::new();
+                 if let Some(u_map) = map.get("uniforms").and_then(|v| v.clone().try_cast::<Map>()) {
+                     for (k, v) in u_map {
+                         if let Ok(f) = v.as_float() {
+                             uniforms.insert(k.to_string(), Animated::new(f as f32));
+                         }
+                     }
+                 }
+
+                 let effect = EffectType::RuntimeShader {
+                     sksl: code,
+                     uniforms
+                 };
+                 apply_effect_to_node(&mut d, node.id, effect);
+             }
         }
     });
 }

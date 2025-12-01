@@ -95,6 +95,16 @@ A visual element in the scene graph (Box, Text, Image, Video, Composition).
     *   Animates the node along an SVG path.
 *   **`add_animator(start_idx: int, end_idx: int, prop: string, start: float, end: float, duration: float, easing: string)`**
     *   (Text Only) Animates a property on a specific range of characters (graphemes).
+*   **`apply_effect(name: string)`**
+    *   Applies a built-in effect.
+    *   Names: `"grayscale"`, `"sepia"`, `"invert"`.
+*   **`apply_effect(name: string, value: float)`**
+    *   Applies a configurable built-in effect.
+    *   Names: `"contrast"`, `"brightness"`, `"blur"`.
+*   **`apply_effect(name: string, config: Map)`**
+    *   Applies a complex effect (e.g. custom shader).
+    *   Name: `"shader"`.
+    *   Config: `#{ code: "...", uniforms: #{ ... } }`.
 
 ### `AudioTrack`
 Handle to an audio resource.

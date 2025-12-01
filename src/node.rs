@@ -1,7 +1,8 @@
 use skia_safe::{
     Canvas, Paint, Rect, RRect, ClipOp, PaintStyle, Image, Color4f, Data, FontMgr,
     FontStyle, ColorType, AlphaType, Path, Point, gradient_shader, TileMode, Matrix, TextBlobBuilder,
-    font_style::{Weight as SkWeight, Width as SkWidth, Slant as SkSlant}, Surface
+    font_style::{Weight as SkWeight, Width as SkWidth, Slant as SkSlant}, Surface,
+    RuntimeEffect, image_filters, color_filters, runtime_effect::RuntimeShaderBuilder, ColorMatrix
 };
 use taffy::style::Style;
 use crate::element::{Element, Color, TextSpan};
@@ -11,6 +12,8 @@ use crate::layout::LayoutEngine;
 use crate::render::render_recursive;
 use cosmic_text::{Buffer, FontSystem, Metrics, SwashCache, Attrs, AttrsList, Shaping, Weight, Style as CosmicStyle, Family};
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::any::Any;
 use std::fmt;
 use std::io::Write;
 use tempfile::NamedTempFile;
@@ -29,6 +32,170 @@ fn parse_easing(e: &str) -> EasingType {
         "ease_in_out" => EasingType::EaseInOut,
         "bounce_out" => EasingType::BounceOut,
         _ => EasingType::Linear,
+    }
+}
+
+// --- Effect Node & Types ---
+
+#[derive(Debug, Clone)]
+pub enum EffectType {
+    Blur(Animated<f32>),
+    ColorMatrix(Vec<f32>),
+    RuntimeShader {
+        sksl: String,
+        uniforms: HashMap<String, Animated<f32>>,
+    },
+    DropShadow {
+        blur: Animated<f32>,
+        offset_x: Animated<f32>,
+        offset_y: Animated<f32>,
+        color: Animated<Color>,
+    },
+}
+
+impl EffectType {
+    pub fn update(&mut self, time: f64) {
+        match self {
+            EffectType::Blur(a) => a.update(time),
+            EffectType::ColorMatrix(_) => {},
+            EffectType::RuntimeShader { uniforms, .. } => {
+                for val in uniforms.values_mut() {
+                    val.update(time);
+                }
+            },
+            EffectType::DropShadow { blur, offset_x, offset_y, color } => {
+                blur.update(time);
+                offset_x.update(time);
+                offset_y.update(time);
+                color.update(time);
+            }
+        }
+    }
+}
+
+fn build_effect_filter(effects: &[EffectType], shader_cache: Option<&Arc<Mutex<HashMap<String, RuntimeEffect>>>>) -> Option<skia_safe::ImageFilter> {
+    let mut current_filter = None;
+    for effect in effects {
+        match effect {
+            EffectType::Blur(sigma) => {
+                current_filter = image_filters::blur(
+                    (sigma.current_value, sigma.current_value),
+                    TileMode::Decal,
+                    current_filter,
+                    None
+                );
+            },
+            EffectType::DropShadow { blur, offset_x, offset_y, color } => {
+                current_filter = image_filters::drop_shadow(
+                    (offset_x.current_value, offset_y.current_value),
+                    (blur.current_value, blur.current_value),
+                    color.current_value.to_skia(),
+                    None,
+                    current_filter,
+                    None
+                );
+            },
+            EffectType::ColorMatrix(matrix) => {
+                if matrix.len() == 20 {
+                    if let Ok(m) = matrix.as_slice().try_into() {
+                        let m: &[f32; 20] = m;
+                        let cm = ColorMatrix::new(
+                            m[0], m[1], m[2], m[3], m[4],
+                            m[5], m[6], m[7], m[8], m[9],
+                            m[10], m[11], m[12], m[13], m[14],
+                            m[15], m[16], m[17], m[18], m[19]
+                        );
+                        let cf = color_filters::matrix(&cm, None);
+                        current_filter = image_filters::color_filter(cf, current_filter, None);
+                    }
+                }
+            },
+            EffectType::RuntimeShader { sksl, uniforms } => {
+                if let Some(cache_arc) = shader_cache {
+                    let mut cache = cache_arc.lock().unwrap();
+                    if !cache.contains_key(sksl) {
+                         match RuntimeEffect::make_for_shader(sksl, None) {
+                             Ok(effect) => {
+                                 cache.insert(sksl.clone(), effect);
+                             },
+                             Err(e) => {
+                                 eprintln!("Shader compilation error: {}", e);
+                                 continue;
+                             }
+                         }
+                    }
+
+                    if let Some(effect) = cache.get(sksl) {
+                         let mut builder = RuntimeShaderBuilder::new(effect.clone());
+                         for (key, val) in uniforms {
+                             builder.set_uniform_float(key, &[val.current_value]);
+                         }
+                         // "image" is the standard name for the input texture in SkSL for ImageFilters
+                         current_filter = image_filters::runtime_shader(&builder, "image", current_filter);
+                    }
+                }
+            }
+        }
+    }
+    current_filter
+}
+
+pub struct EffectNode {
+    pub effects: Vec<EffectType>,
+    pub style: Style,
+    pub shader_cache: Arc<Mutex<HashMap<String, RuntimeEffect>>>,
+}
+
+impl Clone for EffectNode {
+    fn clone(&self) -> Self {
+        Self {
+            effects: self.effects.clone(),
+            style: self.style.clone(),
+            shader_cache: self.shader_cache.clone(),
+        }
+    }
+}
+
+impl fmt::Debug for EffectNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EffectNode")
+         .field("effects", &self.effects)
+         .finish()
+    }
+}
+
+impl Element for EffectNode {
+    fn as_any(&self) -> &dyn Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn Any { self }
+
+    fn layout_style(&self) -> Style {
+        self.style.clone()
+    }
+
+    fn update(&mut self, time: f64) -> bool {
+        for effect in &mut self.effects {
+            effect.update(time);
+        }
+        true
+    }
+
+    fn render(&self, canvas: &Canvas, rect: Rect, opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) {
+        let filter = build_effect_filter(&self.effects, Some(&self.shader_cache));
+
+        let mut paint = Paint::default();
+        paint.set_alpha_f(opacity);
+        if let Some(f) = filter {
+            paint.set_image_filter(f);
+        }
+
+        // Do not restrict bounds to rect, otherwise shadows/blurs are clipped
+        canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&paint));
+        draw_children(canvas);
+        canvas.restore();
+    }
+
+    fn animate_property(&mut self, _property: &str, _start: f32, _target: f32, _duration: f64, _easing: &str) {
+        // Not implemented for individual effect properties via string key yet
     }
 }
 
@@ -70,6 +237,9 @@ impl BoxNode {
 }
 
 impl Element for BoxNode {
+    fn as_any(&self) -> &dyn Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn Any { self }
+
     fn layout_style(&self) -> Style {
         self.style.clone()
     }
@@ -112,36 +282,22 @@ impl Element for BoxNode {
         let mut paint = Paint::default();
         paint.set_anti_alias(true);
 
-        let mut current_filter = None;
-
+        let mut effects = Vec::new();
         if self.blur.current_value > 0.0 {
-            let sigma = self.blur.current_value;
-            current_filter = skia_safe::image_filters::blur(
-                (sigma, sigma),
-                skia_safe::TileMode::Decal,
-                current_filter.clone(),
-                None
-            );
+            effects.push(EffectType::Blur(self.blur.clone()));
         }
-
         if let Some(sc) = &self.shadow_color {
-            let color = sc.current_value.to_skia();
-            let sigma = self.shadow_blur.current_value;
-            let dx = self.shadow_offset_x.current_value;
-            let dy = self.shadow_offset_y.current_value;
-
-            current_filter = skia_safe::image_filters::drop_shadow(
-                (dx, dy),
-                (sigma, sigma),
-                color,
-                None,
-                current_filter,
-                None
-            );
+             effects.push(EffectType::DropShadow {
+                 blur: self.shadow_blur.clone(),
+                 offset_x: self.shadow_offset_x.clone(),
+                 offset_y: self.shadow_offset_y.clone(),
+                 color: sc.clone()
+             });
         }
 
-        if let Some(filter) = current_filter {
-            paint.set_image_filter(filter);
+        let filter = build_effect_filter(&effects, None);
+        if let Some(f) = filter {
+            paint.set_image_filter(f);
         }
 
         if let Some(bg) = &self.bg_color {
@@ -320,6 +476,9 @@ impl TextNode {
 }
 
 impl Element for TextNode {
+    fn as_any(&self) -> &dyn Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn Any { self }
+
     fn layout_style(&self) -> Style {
         Style::DEFAULT
     }
@@ -632,6 +791,9 @@ impl ImageNode {
 }
 
 impl Element for ImageNode {
+    fn as_any(&self) -> &dyn Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn Any { self }
+
     fn layout_style(&self) -> Style {
         Style::DEFAULT
     }
@@ -718,6 +880,9 @@ impl VideoNode {
 }
 
 impl Element for VideoNode {
+    fn as_any(&self) -> &dyn Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn Any { self }
+
     fn layout_style(&self) -> Style {
         Style::DEFAULT
     }
@@ -813,6 +978,9 @@ impl fmt::Debug for CompositionNode {
 }
 
 impl Element for CompositionNode {
+    fn as_any(&self) -> &dyn Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn Any { self }
+
     fn layout_style(&self) -> Style {
         self.style.clone()
     }

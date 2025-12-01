@@ -5,7 +5,9 @@ use crate::animation::{Animated, EasingType};
 use crate::AssetLoader;
 use crate::audio::{AudioMixer, AudioTrack};
 use crate::video_wrapper::RenderMode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use skia_safe::RuntimeEffect;
 
 /// A unique identifier for a node in the scene graph.
 pub type NodeId = usize;
@@ -142,6 +144,8 @@ pub struct Director {
     pub asset_loader: Arc<dyn AssetLoader>,
     /// Audio Mixer state
     pub audio_mixer: AudioMixer,
+    /// Global shader cache
+    pub shader_cache: Arc<Mutex<HashMap<String, RuntimeEffect>>>,
 }
 
 impl Director {
@@ -159,6 +163,7 @@ impl Director {
             render_mode,
             asset_loader,
             audio_mixer: AudioMixer::new(48000),
+            shader_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 

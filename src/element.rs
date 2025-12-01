@@ -1,6 +1,7 @@
 use skia_safe::{Canvas, Rect, Color4f};
 use taffy::style::Style;
 use keyframe::CanTween;
+use std::any::Any;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Color {
@@ -96,6 +97,9 @@ impl<T> ElementClone for T where T: 'static + Element + Clone {
 }
 
 pub trait Element: std::fmt::Debug + ElementClone {
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+
     // 1. Layout Phase
     fn layout_style(&self) -> Style;
 
