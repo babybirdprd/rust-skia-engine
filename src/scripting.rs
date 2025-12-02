@@ -1,8 +1,8 @@
 use rhai::{Engine, Map, Module};
 use crate::director::{Director, NodeId, TimelineItem, PathAnimationState, Transition, TransitionType};
-use crate::node::{BoxNode, TextNode, ImageNode, VideoNode, CompositionNode, EffectType, EffectNode, VectorNode};
+use crate::node::{BoxNode, TextNode, ImageNode, VideoNode, CompositionNode, EffectType, EffectNode, VectorNode, ShapeNode, ShapeType};
 use crate::video_wrapper::RenderMode;
-use crate::element::{Element, Color, TextSpan, GradientConfig, TextFit, TextShadow};
+use crate::element::{Color, TextSpan, GradientConfig, TextFit, TextShadow};
 use crate::animation::{Animated, EasingType};
 use crate::tokens::DesignSystem;
 use crate::AssetLoader;
@@ -649,6 +649,102 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         d.add_child(scene.root_id, id);
 
         NodeHandle { director: scene.director.clone(), id }
+    });
+
+    let parse_shape_node = |props: &rhai::Map| -> Option<ShapeNode> {
+        let type_str = props.get("type").and_then(|v| v.clone().into_string().ok())?;
+        let shape_type = match type_str.as_str() {
+            "rect" | "rectangle" => {
+                let width = props.get("width").and_then(|v| v.as_float().ok()).unwrap_or(100.0) as f32;
+                let height = props.get("height").and_then(|v| v.as_float().ok()).unwrap_or(100.0) as f32;
+                let corner_radius = props.get("corner_radius").and_then(|v| v.as_float().ok()).unwrap_or(0.0) as f32;
+                Some(ShapeType::Rect { width, height, corner_radius })
+            },
+            "circle" => {
+                let radius = props.get("radius").and_then(|v| v.as_float().ok()).unwrap_or(50.0) as f32;
+                Some(ShapeType::Circle { radius })
+            },
+            "ellipse" => {
+                 let radius_x = props.get("radius_x").and_then(|v| v.as_float().ok()).unwrap_or(50.0) as f32;
+                 let radius_y = props.get("radius_y").and_then(|v| v.as_float().ok()).unwrap_or(30.0) as f32;
+                 Some(ShapeType::Ellipse { radius_x, radius_y })
+            },
+            "path" => {
+                let d = props.get("d").and_then(|v| v.clone().into_string().ok()).unwrap_or_default();
+                Some(ShapeType::Path { d })
+            },
+            _ => None
+        }?;
+
+        let mut node = ShapeNode::new(shape_type);
+
+        // Colors
+        if let Some(c) = props.get("fill_color").and_then(|v| v.clone().into_string().ok()) {
+             if let Some(col) = parse_hex_color(&c) {
+                 node.fill_color = Some(Animated::new(col));
+             }
+        }
+        if let Some(c) = props.get("stroke_color").and_then(|v| v.clone().into_string().ok()) {
+             if let Some(col) = parse_hex_color(&c) {
+                 node.stroke_color = Some(Animated::new(col));
+             }
+        }
+
+        // Stroke Props
+        if let Some(v) = props.get("stroke_width").and_then(|v| v.as_float().ok()) {
+            node.stroke_width = Animated::new(v as f32);
+        }
+        if let Some(s) = props.get("stroke_cap").and_then(|v| v.clone().into_string().ok()) {
+            node.stroke_cap = match s.as_str() {
+                "round" => skia_safe::PaintCap::Round,
+                "square" => skia_safe::PaintCap::Square,
+                _ => skia_safe::PaintCap::Butt,
+            };
+        }
+        if let Some(s) = props.get("stroke_join").and_then(|v| v.clone().into_string().ok()) {
+            node.stroke_join = match s.as_str() {
+                "round" => skia_safe::PaintJoin::Round,
+                "bevel" => skia_safe::PaintJoin::Bevel,
+                _ => skia_safe::PaintJoin::Miter,
+            };
+        }
+
+        // Trim Props
+        if let Some(v) = props.get("stroke_start").and_then(|v| v.as_float().ok()) {
+            node.stroke_start = Animated::new(v as f32);
+        }
+        if let Some(v) = props.get("stroke_end").and_then(|v| v.as_float().ok()) {
+            node.stroke_end = Animated::new(v as f32);
+        }
+        if let Some(v) = props.get("stroke_offset").and_then(|v| v.as_float().ok()) {
+            node.stroke_offset = Animated::new(v as f32);
+        }
+
+        // Layout
+        parse_layout_style(props, &mut node.style);
+
+        // Intrinsic Size Fallback
+        if node.style.size.width == Dimension::auto() {
+             node.style.size.width = Dimension::length(node.intrinsic_size.width);
+        }
+        if node.style.size.height == Dimension::auto() {
+             node.style.size.height = Dimension::length(node.intrinsic_size.height);
+        }
+
+        Some(node)
+    };
+
+    engine.register_fn("add_shape", move |scene: &mut SceneHandle, props: rhai::Map| {
+        let mut d = scene.director.lock().unwrap();
+        if let Some(node) = parse_shape_node(&props) {
+            let id = d.add_node(Box::new(node));
+            d.add_child(scene.root_id, id);
+            NodeHandle { director: scene.director.clone(), id }
+        } else {
+            // Error handling?
+            eprintln!("Invalid shape definition");
+            NodeHandle { director: scene.director.clone(), id: 0 }
+        }
     });
 
     engine.register_fn("add_image", |parent: &mut NodeHandle, path: &str| {
