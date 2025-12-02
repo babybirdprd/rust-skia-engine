@@ -1334,3 +1334,5 @@ impl Element for CompositionNode {
         Some(d.mix_audio(samples_needed, comp_time))
     }
 }
+pub mod vector;
+pub use vector::VectorNode;
