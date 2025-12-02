@@ -12,6 +12,7 @@ pub mod animation;
 pub mod render;
 pub mod layout;
 pub mod scripting;
+pub mod shaders;
 pub mod video_wrapper;
 pub mod audio;
 pub mod tokens;
