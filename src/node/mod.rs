@@ -73,7 +73,12 @@ impl EffectType {
     }
 }
 
-fn build_effect_filter(effects: &[EffectType], shader_cache: Option<&Arc<Mutex<HashMap<String, RuntimeEffect>>>>) -> Option<skia_safe::ImageFilter> {
+fn build_effect_filter(
+    effects: &[EffectType],
+    shader_cache: Option<&Arc<Mutex<HashMap<String, RuntimeEffect>>>>,
+    resolution: (f32, f32),
+    time: f32
+) -> Option<skia_safe::ImageFilter> {
     let mut current_filter = None;
     for effect in effects {
         match effect {
@@ -130,6 +135,10 @@ fn build_effect_filter(effects: &[EffectType], shader_cache: Option<&Arc<Mutex<H
                          for (key, val) in uniforms {
                              let _ = builder.set_uniform_float(key, &[val.current_value]);
                          }
+                         // Auto-inject standard uniforms if they exist in the shader
+                         let _ = builder.set_uniform_float("resolution", &[resolution.0, resolution.1]);
+                         let _ = builder.set_uniform_float("time", &[time]);
+
                          // "image" is the standard name for the input texture in SkSL for ImageFilters
                          current_filter = image_filters::runtime_shader(&builder, "image", current_filter);
                     }
@@ -144,6 +153,7 @@ pub struct EffectNode {
     pub effects: Vec<EffectType>,
     pub style: Style,
     pub shader_cache: Arc<Mutex<HashMap<String, RuntimeEffect>>>,
+    pub time: f32, // Track local time for shaders
 }
 
 impl Clone for EffectNode {
@@ -152,6 +162,7 @@ impl Clone for EffectNode {
             effects: self.effects.clone(),
             style: self.style.clone(),
             shader_cache: self.shader_cache.clone(),
+            time: 0.0,
         }
     }
 }
@@ -173,6 +184,7 @@ impl Element for EffectNode {
     }
 
     fn update(&mut self, time: f64) -> bool {
+        self.time = time as f32;
         for effect in &mut self.effects {
             effect.update(time);
         }
@@ -180,7 +192,7 @@ impl Element for EffectNode {
     }
 
     fn render(&self, canvas: &Canvas, rect: Rect, opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) {
-        let filter = build_effect_filter(&self.effects, Some(&self.shader_cache));
+        let filter = build_effect_filter(&self.effects, Some(&self.shader_cache), (rect.width(), rect.height()), self.time);
 
         let mut paint = Paint::default();
         paint.set_alpha_f(opacity);
@@ -236,6 +248,7 @@ pub struct BoxNode {
     pub border_width: Animated<f32>,
     pub border_color: Option<Animated<Color>>,
     pub overflow: String,
+    pub time: f32,
 }
 
 impl BoxNode {
@@ -253,6 +266,7 @@ impl BoxNode {
             border_width: Animated::new(0.0),
             border_color: None,
             overflow: "visible".to_string(),
+            time: 0.0,
         }
     }
 }
@@ -266,6 +280,7 @@ impl Element for BoxNode {
     }
 
     fn update(&mut self, time: f64) -> bool {
+        self.time = time as f32;
         let mut changed = false;
         if let Some(bg) = &mut self.bg_color {
             bg.update(time);
@@ -316,7 +331,7 @@ impl Element for BoxNode {
              });
         }
 
-        let filter = build_effect_filter(&effects, None);
+        let filter = build_effect_filter(&effects, None, (rect.width(), rect.height()), self.time);
         if let Some(f) = filter {
             paint.set_image_filter(f);
         }

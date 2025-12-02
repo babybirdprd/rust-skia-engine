@@ -99,6 +99,7 @@ fn apply_effect_to_node(d: &mut Director, node_id: NodeId, effect: EffectType) -
         effects: vec![effect],
         style: wrapper_style,
         shader_cache: d.shader_cache.clone(),
+        time: 0.0,
     };
 
     let effect_id = d.add_node(Box::new(effect_node));
@@ -1242,6 +1243,16 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
             "blur" => {
                 Some(EffectType::Blur(Animated::new(val)))
             },
+            "film_grain" => {
+                let mut uniforms = HashMap::new();
+                uniforms.insert("intensity".to_string(), Animated::new(val));
+                Some(EffectType::RuntimeShader { sksl: crate::shaders::FILM_GRAIN.to_string(), uniforms })
+            },
+            "vignette" => {
+                let mut uniforms = HashMap::new();
+                uniforms.insert("intensity".to_string(), Animated::new(val));
+                Some(EffectType::RuntimeShader { sksl: crate::shaders::VIGNETTE.to_string(), uniforms })
+            },
             _ => None
         };
 
@@ -1274,6 +1285,31 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
                  return NodeHandle { director: node.director.clone(), id };
              }
         }
-        NodeHandle { director: node.director.clone(), id: node.id }
+
+        // Configurable Presets
+        let effect = match name {
+            "glitch_analog" => {
+                let speed = map.get("speed").and_then(|v| v.as_float().ok()).unwrap_or(1.0) as f32;
+                let amount = map.get("amount").and_then(|v| v.as_float().ok()).unwrap_or(0.1) as f32;
+                let mut uniforms = HashMap::new();
+                uniforms.insert("speed".to_string(), Animated::new(speed));
+                uniforms.insert("amount".to_string(), Animated::new(amount));
+                Some(EffectType::RuntimeShader { sksl: crate::shaders::GLITCH_ANALOG.to_string(), uniforms })
+            },
+            "halftone" => {
+                let dot_size = map.get("dot_size").and_then(|v| v.as_float().ok()).unwrap_or(8.0) as f32;
+                let mut uniforms = HashMap::new();
+                uniforms.insert("dotSize".to_string(), Animated::new(dot_size));
+                Some(EffectType::RuntimeShader { sksl: crate::shaders::HALFTONE.to_string(), uniforms })
+            },
+            _ => None
+        };
+
+        if let Some(eff) = effect {
+            let id = apply_effect_to_node(&mut d, node.id, eff);
+            NodeHandle { director: node.director.clone(), id }
+        } else {
+            NodeHandle { director: node.director.clone(), id: node.id }
+        }
     });
 }

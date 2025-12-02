@@ -77,10 +77,15 @@ impl Element for VectorNode {
         if needs_update {
             // Rasterize
             let tree_size = self.tree.size();
+
+            // Aspect Ratio: Contain
             let sx = width as f32 / tree_size.width();
             let sy = height as f32 / tree_size.height();
+            let scale = sx.min(sy);
 
-            let transform = Transform::from_scale(sx, sy);
+            let tx = (width as f32 - tree_size.width() * scale) / 2.0;
+            let ty = (height as f32 - tree_size.height() * scale) / 2.0;
+            let transform = Transform::from_scale(scale, scale).post_translate(tx, ty);
 
             if let Some(mut pixmap) = Pixmap::new(width, height) {
                 resvg::render(&self.tree, transform, &mut pixmap.as_mut());
