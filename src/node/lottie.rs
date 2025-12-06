@@ -3,13 +3,13 @@ use skia_safe::{Canvas, Rect};
 use taffy::style::Style;
 use std::sync::{Arc, Mutex};
 use std::any::Any;
-use lottie_core::LottiePlayer;
+use lottie_core::{LottiePlayer, LottieAsset};
 use lottie_data::model::LottieJson;
 use lottie_skia::SkiaRenderer;
 use crate::animation::{Animated, EasingType};
 
 pub struct LottieNode {
-    model: Arc<LottieJson>,
+    asset: Arc<LottieAsset>,
     player: Mutex<LottiePlayer>,
     pub style: Style,
     pub opacity: Animated<f32>,
@@ -33,10 +33,10 @@ impl std::fmt::Debug for LottieNode {
 impl Clone for LottieNode {
     fn clone(&self) -> Self {
         let mut player = LottiePlayer::new();
-        player.load((*self.model).clone());
+        player.load(self.asset.clone());
 
         Self {
-            model: self.model.clone(),
+            asset: self.asset.clone(),
             player: Mutex::new(player),
             style: self.style.clone(),
             opacity: self.opacity.clone(),
@@ -51,11 +51,13 @@ impl LottieNode {
     pub fn new(data: &[u8]) -> anyhow::Result<Self> {
         let json_str = std::str::from_utf8(data)?;
         let model: LottieJson = serde_json::from_str(json_str)?;
+
+        let asset = Arc::new(LottieAsset::from_model(model));
         let mut player = LottiePlayer::new();
-        player.load(model.clone());
+        player.load(asset.clone());
 
         Ok(Self {
-            model: Arc::new(model),
+            asset,
             player: Mutex::new(player),
             style: Style::DEFAULT,
             opacity: Animated::new(1.0),
@@ -83,9 +85,9 @@ impl Element for LottieNode {
         if self.frame.raw_keyframes.len() > 1 {
              player.current_frame = self.frame.current_value;
         } else {
-             let fps = self.model.fr;
-             let start_frame = self.model.ip;
-             let end_frame = self.model.op;
+             let fps = self.asset.frame_rate;
+             let start_frame = self.asset.model.ip;
+             let end_frame = self.asset.model.op;
 
              // Check if duration is valid
              let total_frames = end_frame - start_frame;
