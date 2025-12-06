@@ -133,6 +133,8 @@ pub struct Transition {
 pub struct Director {
     /// The Arena of all nodes. Using `Option` allows for future removal/recycling.
     pub nodes: Vec<Option<SceneNode>>,
+    /// Indices of nodes that have been removed and can be reused.
+    pub free_indices: Vec<usize>,
     /// The timeline of scenes.
     pub timeline: Vec<TimelineItem>,
     /// Transitions
@@ -184,6 +186,7 @@ impl Director {
 
         Self {
             nodes: Vec::new(),
+            free_indices: Vec::new(),
             timeline: Vec::new(),
             transitions: Vec::new(),
             width,
@@ -271,9 +274,42 @@ impl Director {
 
     /// Adds a new element to the scene graph and returns its ID.
     pub fn add_node(&mut self, element: Box<dyn Element>) -> NodeId {
-        let id = self.nodes.len();
-        self.nodes.push(Some(SceneNode::new(element)));
-        id
+        if let Some(id) = self.free_indices.pop() {
+            self.nodes[id] = Some(SceneNode::new(element));
+            id
+        } else {
+            let id = self.nodes.len();
+            self.nodes.push(Some(SceneNode::new(element)));
+            id
+        }
+    }
+
+    /// Recursively destroys a node and its children, freeing their indices for reuse.
+    pub fn destroy_node(&mut self, id: NodeId) {
+        // 1. Check if node exists (and isn't already deleted)
+        if id >= self.nodes.len() || self.nodes[id].is_none() {
+            return;
+        }
+
+        // 2. Collect IDs to process (to avoid holding borrows on self.nodes)
+        let (parent_id, children_ids) = {
+            let node = self.nodes[id].as_ref().unwrap();
+            (node.parent, node.children.clone())
+        };
+
+        // 3. Detach from Parent
+        if let Some(pid) = parent_id {
+            self.remove_child(pid, id);
+        }
+
+        // 4. Recursively destroy children
+        for child_id in children_ids {
+            self.destroy_node(child_id);
+        }
+
+        // 5. Free the slot
+        self.nodes[id] = None;
+        self.free_indices.push(id);
     }
 
     /// Establishes a parent-child relationship between two nodes.

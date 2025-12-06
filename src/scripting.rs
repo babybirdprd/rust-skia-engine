@@ -547,6 +547,11 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
     // 3. Elements
     engine.register_type_with_name::<NodeHandle>("Node");
 
+    engine.register_fn("destroy", |node: &mut NodeHandle| {
+        let mut d = node.director.lock().unwrap();
+        d.destroy_node(node.id);
+    });
+
     engine.register_fn("add_box", |parent: &mut NodeHandle, props: rhai::Map| {
         let mut d = parent.director.lock().unwrap();
         let mut box_node = BoxNode::new();
