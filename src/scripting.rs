@@ -1,6 +1,6 @@
 use rhai::{Engine, Map, Module};
 use crate::director::{Director, NodeId, TimelineItem, PathAnimationState, Transition, TransitionType};
-use crate::node::{BoxNode, TextNode, ImageNode, VideoNode, CompositionNode, EffectType, EffectNode, VectorNode, LottieNode};
+use crate::node::{BoxNode, TextNode, ImageNode, VideoNode, CompositionNode, EffectType, EffectNode, VectorNode, LottieNode, VideoSource};
 use crate::video_wrapper::RenderMode;
 use crate::element::{Element, Color, TextSpan, GradientConfig, TextFit, TextShadow};
 use crate::animation::{Animated, EasingType};
@@ -781,10 +781,17 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
     engine.register_fn("add_video", |parent: &mut NodeHandle, path: &str| {
          let mut d = parent.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
          let mode = d.render_mode;
+         let p = std::path::Path::new(path);
 
-         let vid_node = VideoNode::new(bytes, mode);
+         let source = if p.exists() && p.is_file() {
+             VideoSource::Path(p.to_path_buf())
+         } else {
+             let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+             VideoSource::Bytes(bytes)
+         };
+
+         let vid_node = VideoNode::new(source, mode);
          let id = d.add_node(Box::new(vid_node));
          d.add_child(parent.id, id);
          NodeHandle { director: parent.director.clone(), id }
@@ -792,10 +799,17 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
     engine.register_fn("add_video", |parent: &mut NodeHandle, path: &str, props: rhai::Map| {
          let mut d = parent.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
          let mode = d.render_mode;
+         let p = std::path::Path::new(path);
 
-         let mut vid_node = VideoNode::new(bytes, mode);
+         let source = if p.exists() && p.is_file() {
+             VideoSource::Path(p.to_path_buf())
+         } else {
+             let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+             VideoSource::Bytes(bytes)
+         };
+
+         let mut vid_node = VideoNode::new(source, mode);
          parse_layout_style(&props, &mut vid_node.style);
 
          let id = d.add_node(Box::new(vid_node));
