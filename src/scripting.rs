@@ -928,7 +928,9 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          // Cycle Detection
          if Arc::ptr_eq(&scene.director, &comp_def.director) {
              eprintln!("Error: Cycle detected. A composition cannot contain itself.");
-             return NodeHandle { director: scene.director.clone(), id: 0 };
+             let mut d = scene.director.lock().unwrap();
+             let id = d.add_node(Box::new(BoxNode::new()));
+             return NodeHandle { director: scene.director.clone(), id };
          }
 
          let mut inner_director = comp_def.director.lock().unwrap().clone();
@@ -960,7 +962,9 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          // Cycle Detection
          if Arc::ptr_eq(&scene.director, &comp_def.director) {
              eprintln!("Error: Cycle detected. A composition cannot contain itself.");
-             return NodeHandle { director: scene.director.clone(), id: 0 };
+             let mut d = scene.director.lock().unwrap();
+             let id = d.add_node(Box::new(BoxNode::new()));
+             return NodeHandle { director: scene.director.clone(), id };
          }
 
          let mut inner_director = comp_def.director.lock().unwrap().clone();
