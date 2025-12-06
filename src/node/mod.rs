@@ -16,12 +16,18 @@ use std::collections::HashMap;
 use std::any::Any;
 use std::fmt;
 use std::io::Write;
+use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use unicode_segmentation::UnicodeSegmentation;
 use std::ops::Range;
 
 // Video imports
 use crate::video_wrapper::{AsyncDecoder, RenderMode, VideoResponse};
+
+pub enum VideoSource {
+    Path(PathBuf),
+    Bytes(Vec<u8>),
+}
 
 // Helper to parse easing
 fn parse_easing(e: &str) -> EasingType {
@@ -1092,14 +1098,16 @@ pub struct VideoNode {
 
     // Keep temp file alive
     #[allow(dead_code)]
-    temp_file: Arc<NamedTempFile>,
+    temp_file: Option<Arc<NamedTempFile>>,
+    // Also keep path for cloning if it was a file path
+    path: PathBuf,
 }
 
 impl Clone for VideoNode {
     fn clone(&self) -> Self {
         let decoder = if self.decoder.is_some() {
              // Create new decoder pointing to same file.
-             AsyncDecoder::new(self.temp_file.path().to_owned(), self.render_mode).ok()
+             AsyncDecoder::new(self.path.clone(), self.render_mode).ok()
         } else {
              None
         };
@@ -1111,19 +1119,24 @@ impl Clone for VideoNode {
             decoder,
             render_mode: self.render_mode,
             temp_file: self.temp_file.clone(),
+            path: self.path.clone(),
         }
     }
 }
 
 impl VideoNode {
-    pub fn new(data: Vec<u8>, mode: RenderMode) -> Self {
-        // Write data to temp file
-        let mut temp = NamedTempFile::new().expect("Failed to create temp file");
-        temp.write_all(&data).expect("Failed to write video data");
-        let path = temp.path().to_owned();
-        let temp_arc = Arc::new(temp);
+    pub fn new(source: VideoSource, mode: RenderMode) -> Self {
+        let (path, temp_file) = match source {
+            VideoSource::Path(p) => (p, None),
+            VideoSource::Bytes(data) => {
+                let mut temp = NamedTempFile::new().expect("Failed to create temp file");
+                temp.write_all(&data).expect("Failed to write video data");
+                let p = temp.path().to_owned();
+                (p, Some(Arc::new(temp)))
+            }
+        };
 
-        let decoder = AsyncDecoder::new(path, mode).ok();
+        let decoder = AsyncDecoder::new(path.clone(), mode).ok();
 
         Self {
             opacity: Animated::new(1.0),
@@ -1131,7 +1144,8 @@ impl VideoNode {
             current_frame: Mutex::new(None),
             decoder,
             render_mode: mode,
-            temp_file: temp_arc,
+            temp_file,
+            path,
         }
     }
 }
