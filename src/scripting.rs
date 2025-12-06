@@ -665,7 +665,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          let mut d = parent.director.lock().unwrap();
          let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
 
-         match LottieNode::new(&bytes) {
+         match LottieNode::new(&bytes, HashMap::new()) {
              Ok(lottie_node) => {
                  let id = d.add_node(Box::new(lottie_node));
                  d.add_child(parent.id, id);
@@ -683,7 +683,20 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          let mut d = parent.director.lock().unwrap();
          let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
 
-         match LottieNode::new(&bytes) {
+         let mut assets_map = HashMap::new();
+         if let Some(assets_prop) = props.get("assets").and_then(|v| v.clone().try_cast::<Map>()) {
+             for (key, val) in assets_prop {
+                 if let Ok(asset_path) = val.into_string() {
+                      let asset_bytes = d.asset_loader.load_bytes(&asset_path).unwrap_or(Vec::new());
+                      let data = skia_safe::Data::new_copy(&asset_bytes);
+                      if let Some(image) = skia_safe::Image::from_encoded(data) {
+                          assets_map.insert(key.to_string(), image);
+                      }
+                 }
+             }
+         }
+
+         match LottieNode::new(&bytes, assets_map) {
              Ok(mut lottie_node) => {
                  parse_layout_style(&props, &mut lottie_node.style);
                  if let Some(v) = props.get("speed").and_then(|v| v.as_float().ok()) {

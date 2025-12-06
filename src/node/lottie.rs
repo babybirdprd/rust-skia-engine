@@ -1,12 +1,35 @@
 use crate::element::Element;
-use skia_safe::{Canvas, Rect};
+use skia_safe::{Canvas, Rect, Image};
 use taffy::style::Style;
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use std::any::Any;
 use lottie_core::{LottiePlayer, LottieAsset};
 use lottie_data::model::LottieJson;
-use lottie_skia::SkiaRenderer;
+use lottie_skia::{SkiaRenderer, LottieContext};
 use crate::animation::{Animated, EasingType};
+
+pub struct LottieAssetManager {
+    pub images: HashMap<String, Image>,
+}
+
+impl std::fmt::Debug for LottieAssetManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LottieAssetManager")
+         .field("images_count", &self.images.len())
+         .finish()
+    }
+}
+
+impl LottieContext for LottieAssetManager {
+    fn load_typeface(&self, _family: &str, _style: &str) -> Option<skia_safe::Typeface> {
+        None
+    }
+
+    fn load_image(&self, id: &str) -> Option<Image> {
+        self.images.get(id).cloned()
+    }
+}
 
 pub struct LottieNode {
     asset: Arc<LottieAsset>,
@@ -16,6 +39,7 @@ pub struct LottieNode {
     pub frame: Animated<f32>,
     pub speed: f32,
     pub loop_anim: bool,
+    pub asset_manager: Arc<LottieAssetManager>,
 }
 
 impl std::fmt::Debug for LottieNode {
@@ -26,6 +50,7 @@ impl std::fmt::Debug for LottieNode {
          .field("frame", &self.frame)
          .field("speed", &self.speed)
          .field("loop_anim", &self.loop_anim)
+         .field("asset_manager", &self.asset_manager)
          .finish()
     }
 }
@@ -43,12 +68,13 @@ impl Clone for LottieNode {
             frame: self.frame.clone(),
             speed: self.speed,
             loop_anim: self.loop_anim,
+            asset_manager: self.asset_manager.clone(),
         }
     }
 }
 
 impl LottieNode {
-    pub fn new(data: &[u8]) -> anyhow::Result<Self> {
+    pub fn new(data: &[u8], assets: HashMap<String, Image>) -> anyhow::Result<Self> {
         let json_str = std::str::from_utf8(data)?;
         let model: LottieJson = serde_json::from_str(json_str)?;
 
@@ -64,6 +90,7 @@ impl LottieNode {
             frame: Animated::new(0.0),
             speed: 1.0,
             loop_anim: false,
+            asset_manager: Arc::new(LottieAssetManager { images: assets }),
         })
     }
 }
@@ -116,7 +143,7 @@ impl Element for LottieNode {
         let tree = player.render_tree();
         let final_opacity = self.opacity.current_value * parent_opacity;
 
-        SkiaRenderer::draw(canvas, &tree, rect, final_opacity, &());
+        SkiaRenderer::draw(canvas, &tree, rect, final_opacity, &*self.asset_manager);
     }
 
     fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str) {
