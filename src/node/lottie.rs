@@ -110,11 +110,11 @@ impl Element for LottieNode {
     }
 
     fn render(&self, canvas: &Canvas, rect: Rect, parent_opacity: f32, _draw_children: &mut dyn FnMut(&Canvas)) {
-        let player = self.player.lock().unwrap();
+        let mut player = self.player.lock().unwrap();
         let tree = player.render_tree();
         let final_opacity = self.opacity.current_value * parent_opacity;
 
-        SkiaRenderer::draw(canvas, &tree, rect, final_opacity);
+        SkiaRenderer::draw(canvas, &tree, rect, final_opacity, &());
     }
 
     fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str) {
