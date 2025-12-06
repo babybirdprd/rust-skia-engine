@@ -14,6 +14,14 @@ use cosmic_text::{FontSystem, SwashCache, fontdb::Source};
 pub type NodeId = usize;
 
 #[derive(Clone)]
+pub struct DirectorContext {
+    pub asset_loader: Arc<dyn AssetLoader>,
+    pub font_system: Arc<Mutex<FontSystem>>,
+    pub swash_cache: Arc<Mutex<SwashCache>>,
+    pub shader_cache: Arc<Mutex<HashMap<String, RuntimeEffect>>>,
+}
+
+#[derive(Clone)]
 pub struct PathAnimationState {
     pub path: Path,
     pub progress: Animated<f32>,
@@ -155,13 +163,24 @@ pub struct Director {
 
 impl Director {
     /// Creates a new Director instance.
-    pub fn new(width: i32, height: i32, fps: u32, asset_loader: Arc<dyn AssetLoader>, render_mode: RenderMode) -> Self {
-        let mut font_system = FontSystem::new();
-        // Load fallback font if available
-        if let Some(bytes) = asset_loader.load_font_fallback() {
-             let mut db = font_system.db_mut();
-             db.load_font_source(Source::Binary(Arc::new(bytes)));
-        }
+    pub fn new(width: i32, height: i32, fps: u32, asset_loader: Arc<dyn AssetLoader>, render_mode: RenderMode, context: Option<DirectorContext>) -> Self {
+
+        let (font_system, swash_cache, shader_cache, loader_to_use) = if let Some(ctx) = context {
+            (ctx.font_system, ctx.swash_cache, ctx.shader_cache, ctx.asset_loader)
+        } else {
+            let mut font_system = FontSystem::new();
+            // Load fallback font if available
+            if let Some(bytes) = asset_loader.load_font_fallback() {
+                 let mut db = font_system.db_mut();
+                 db.load_font_source(Source::Binary(Arc::new(bytes)));
+            }
+            (
+                Arc::new(Mutex::new(font_system)),
+                Arc::new(Mutex::new(SwashCache::new())),
+                Arc::new(Mutex::new(HashMap::new())),
+                asset_loader
+            )
+        };
 
         Self {
             nodes: Vec::new(),
@@ -173,11 +192,11 @@ impl Director {
             samples_per_frame: 1, // Default to no motion blur
             shutter_angle: 180.0,
             render_mode,
-            asset_loader,
+            asset_loader: loader_to_use,
             audio_mixer: AudioMixer::new(48000),
-            shader_cache: Arc::new(Mutex::new(HashMap::new())),
-            font_system: Arc::new(Mutex::new(font_system)),
-            swash_cache: Arc::new(Mutex::new(SwashCache::new())),
+            shader_cache,
+            font_system,
+            swash_cache,
         }
     }
 

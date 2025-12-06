@@ -6,7 +6,7 @@ use director_engine::DefaultAssetLoader;
 #[test]
 fn test_text_fit_shrink() {
     let loader = Arc::new(DefaultAssetLoader);
-    let mut director = Director::new(1920, 1080, 30, loader, RenderMode::Preview);
+    let mut director = Director::new(1920, 1080, 30, loader, RenderMode::Preview, None);
 
     let spans = vec![TextSpan {
         text: "This is a very long text that should definitely shrink if the box is small enough.".to_string(),
@@ -66,7 +66,7 @@ fn test_text_fit_shrink() {
 #[test]
 fn test_render_video_output() {
     let loader = Arc::new(DefaultAssetLoader);
-    let mut director = Director::new(1920, 1080, 30, loader, RenderMode::Export);
+    let mut director = Director::new(1920, 1080, 30, loader, RenderMode::Export, None);
 
     let spans = vec![TextSpan {
         text: "Typography Engine: Text-to-Fit Test".to_string(),

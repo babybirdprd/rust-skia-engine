@@ -435,7 +435,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
     // Overload 1: 3 args (Default Preview)
     let l1 = loader_clone.clone();
     engine.register_fn("new_director", move |w: i64, h: i64, fps: i64| {
-        let director = Director::new(w as i32, h as i32, fps as u32, l1.clone(), RenderMode::Preview);
+        let director = Director::new(w as i32, h as i32, fps as u32, l1.clone(), RenderMode::Preview, None);
         MovieHandle { director: Arc::new(Mutex::new(director)) }
     });
 
@@ -447,7 +447,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
             "export" => RenderMode::Export,
             _ => RenderMode::Preview,
         };
-        let director = Director::new(w as i32, h as i32, fps as u32, l2.clone(), mode);
+        let director = Director::new(w as i32, h as i32, fps as u32, l2.clone(), mode, None);
         MovieHandle { director: Arc::new(Mutex::new(director)) }
     });
 
@@ -918,7 +918,16 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
              return NodeHandle { director: scene.director.clone(), id: 0 };
          }
 
-         let inner_director = comp_def.director.lock().unwrap().clone();
+         let mut inner_director = comp_def.director.lock().unwrap().clone();
+
+         // Share resources from parent
+         {
+             let parent = scene.director.lock().unwrap();
+             inner_director.font_system = parent.font_system.clone();
+             inner_director.swash_cache = parent.swash_cache.clone();
+             inner_director.shader_cache = parent.shader_cache.clone();
+             inner_director.asset_loader = parent.asset_loader.clone();
+         }
 
          let comp_node = CompositionNode {
              internal_director: Mutex::new(inner_director),
@@ -941,7 +950,16 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
              return NodeHandle { director: scene.director.clone(), id: 0 };
          }
 
-         let inner_director = comp_def.director.lock().unwrap().clone();
+         let mut inner_director = comp_def.director.lock().unwrap().clone();
+
+         // Share resources from parent
+         {
+             let parent = scene.director.lock().unwrap();
+             inner_director.font_system = parent.font_system.clone();
+             inner_director.swash_cache = parent.swash_cache.clone();
+             inner_director.shader_cache = parent.shader_cache.clone();
+             inner_director.asset_loader = parent.asset_loader.clone();
+         }
 
          let mut style = Style::default();
          parse_layout_style(&props, &mut style);

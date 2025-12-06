@@ -18,6 +18,7 @@ use modifiers::{
 pub use renderer::*;
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
+use std::sync::Arc;
 
 #[derive(Clone)]
 struct PendingGeometry {
@@ -120,34 +121,32 @@ pub trait TextMeasurer: Send + Sync {
     fn measure(&self, text: &str, font_family: &str, size: f32) -> f32;
 }
 
-pub struct LottiePlayer {
-    pub model: Option<LottieJson>,
-    pub current_frame: f32,
+/// Immutable, shared assets for a Lottie animation.
+pub struct LottieAsset {
+    pub model: LottieJson,
     pub width: f32,
     pub height: f32,
     pub duration_frames: f32,
     pub frame_rate: f32,
     pub assets: HashMap<String, ImageSource>,
     pub text_measurer: Option<Box<dyn TextMeasurer>>,
-    #[cfg(feature = "expressions")]
-    pub expression_evaluator: Option<ExpressionEvaluator>,
 }
 
-impl LottiePlayer {
-    pub fn new() -> Self {
-        #[cfg(feature = "expressions")]
-        let expression_evaluator = Some(ExpressionEvaluator::new());
+impl LottieAsset {
+    pub fn from_model(model: LottieJson) -> Self {
+        let width = model.w as f32;
+        let height = model.h as f32;
+        let frame_rate = model.fr;
+        let duration_frames = model.op - model.ip;
+
         Self {
-            model: None,
-            current_frame: 0.0,
-            width: 500.0,
-            height: 500.0,
-            duration_frames: 60.0,
-            frame_rate: 60.0,
+            model,
+            width,
+            height,
+            duration_frames,
+            frame_rate,
             assets: HashMap::new(),
             text_measurer: None,
-            #[cfg(feature = "expressions")]
-            expression_evaluator,
         }
     }
 
@@ -158,44 +157,63 @@ impl LottiePlayer {
     pub fn set_asset(&mut self, id: String, data: Vec<u8>) {
         self.assets.insert(id, ImageSource::Data(data));
     }
+}
 
-    pub fn load(&mut self, data: LottieJson) {
-        self.width = data.w as f32;
-        self.height = data.h as f32;
-        self.frame_rate = data.fr;
-        self.duration_frames = data.op - data.ip;
-        self.current_frame = data.ip; // Start at in-point
-        self.model = Some(data);
+pub struct LottiePlayer {
+    pub asset: Option<Arc<LottieAsset>>,
+    pub current_frame: f32,
+    #[cfg(feature = "expressions")]
+    pub expression_evaluator: Option<ExpressionEvaluator>,
+}
+
+impl LottiePlayer {
+    pub fn new() -> Self {
+        #[cfg(feature = "expressions")]
+        let expression_evaluator = Some(ExpressionEvaluator::new());
+        Self {
+            asset: None,
+            current_frame: 0.0,
+            #[cfg(feature = "expressions")]
+            expression_evaluator,
+        }
+    }
+
+    pub fn load(&mut self, asset: Arc<LottieAsset>) {
+        self.current_frame = asset.model.ip; // Start at in-point
+        self.asset = Some(asset);
+    }
+
+    // Legacy load for convenience (creates new Asset wrapper)
+    pub fn load_json(&mut self, data: LottieJson) {
+         let asset = Arc::new(LottieAsset::from_model(data));
+         self.load(asset);
     }
 
     pub fn advance(&mut self, dt: f32) {
-        if self.model.is_none() {
-            return;
-        }
-        // dt is in seconds
-        let frames = dt * self.frame_rate;
-        self.current_frame += frames;
+        if let Some(asset) = &self.asset {
+            // dt is in seconds
+            let frames = dt * asset.frame_rate;
+            self.current_frame += frames;
 
-        // Loop
-        if self.current_frame >= self.model.as_ref().unwrap().op {
-            let duration = self.model.as_ref().unwrap().op - self.model.as_ref().unwrap().ip;
-            self.current_frame = self.model.as_ref().unwrap().ip
-                + (self.current_frame - self.model.as_ref().unwrap().op) % duration;
+            // Loop
+            if self.current_frame >= asset.model.op {
+                let duration = asset.model.op - asset.model.ip;
+                self.current_frame = asset.model.ip
+                    + (self.current_frame - asset.model.op) % duration;
+            }
         }
     }
 
     pub fn render_tree(&mut self) -> RenderTree {
-        if let Some(model) = &self.model {
+        if let Some(asset) = &self.asset {
             #[cfg(feature = "expressions")]
             let evaluator = self.expression_evaluator.as_mut();
             #[cfg(not(feature = "expressions"))]
             let evaluator: Option<&mut ()> = None;
 
             let mut builder = SceneGraphBuilder::new(
-                model,
+                asset,
                 self.current_frame,
-                &self.assets,
-                self.text_measurer.as_deref(),
             );
             builder.build(evaluator)
         } else {
@@ -206,48 +224,42 @@ impl LottiePlayer {
 }
 
 struct SceneGraphBuilder<'a> {
-    model: &'a LottieJson,
+    asset: &'a LottieAsset,
     frame: f32,
-    assets: HashMap<String, &'a data::Asset>,
-    external_assets: &'a HashMap<String, ImageSource>,
-    text_measurer: Option<&'a dyn TextMeasurer>,
+    model_assets_map: HashMap<String, &'a data::Asset>,
 }
 
 impl<'a> SceneGraphBuilder<'a> {
     fn new(
-        model: &'a LottieJson,
+        asset: &'a LottieAsset,
         frame: f32,
-        external_assets: &'a HashMap<String, ImageSource>,
-        text_measurer: Option<&'a dyn TextMeasurer>,
     ) -> Self {
-        let mut assets = HashMap::new();
-        for asset in &model.assets {
-            assets.insert(asset.id.clone(), asset);
+        let mut model_assets_map = HashMap::new();
+        for a in &asset.model.assets {
+            model_assets_map.insert(a.id.clone(), a);
         }
         Self {
-            model,
+            asset,
             frame,
-            assets,
-            external_assets,
-            text_measurer,
+            model_assets_map,
         }
     }
 
     fn build(&mut self, #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>, #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>) -> RenderTree {
         let mut layer_map = HashMap::new();
-        for layer in &self.model.layers {
+        for layer in &self.asset.model.layers {
             if let Some(ind) = layer.ind {
                 layer_map.insert(ind, layer);
             }
         }
 
-        let (view_matrix, projection_matrix) = self.get_camera_matrices(&self.model.layers, &layer_map, evaluator.as_deref_mut());
+        let (view_matrix, projection_matrix) = self.get_camera_matrices(&self.asset.model.layers, &layer_map, evaluator.as_deref_mut());
 
-        let root_node = self.build_composition(&self.model.layers, &layer_map, evaluator);
+        let root_node = self.build_composition(&self.asset.model.layers, &layer_map, evaluator);
 
         RenderTree {
-            width: self.model.w as f32,
-            height: self.model.h as f32,
+            width: self.asset.width,
+            height: self.asset.height,
             root: root_node,
             view_matrix,
             projection_matrix,
@@ -274,7 +286,7 @@ impl<'a> SceneGraphBuilder<'a> {
 
             // Step 3: Compute Projection Matrix
             let pe = if let Some(prop) = &cam.pe {
-                Animator::resolve(prop, self.frame - cam.st, |v| *v, 0.0, evaluator, self.model.fr)
+                Animator::resolve(prop, self.frame - cam.st, |v| *v, 0.0, evaluator, self.asset.frame_rate)
             } else {
                 0.0
             };
@@ -285,9 +297,9 @@ impl<'a> SceneGraphBuilder<'a> {
             // pe is distance. Height is comp height.
             // tan(fov/2) = (height/2) / pe
             // fov = 2 * atan(height / (2 * pe))
-            let fov = 2.0 * (self.model.h as f32 / (2.0 * perspective)).atan();
+            let fov = 2.0 * (self.asset.height / (2.0 * perspective)).atan();
 
-            let aspect = self.model.w as f32 / self.model.h as f32;
+            let aspect = self.asset.width / self.asset.height;
             let near = 0.1;
             let far = 10000.0;
 
@@ -373,7 +385,7 @@ impl<'a> SceneGraphBuilder<'a> {
 
         let transform = self.resolve_transform(layer, layer_map, evaluator.as_deref_mut());
 
-        let opacity = Animator::resolve(&layer.ks.o, self.frame - layer.st, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.model.fr);
+        let opacity = Animator::resolve(&layer.ks.o, self.frame - layer.st, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.asset.frame_rate);
 
         let content = if let Some(shapes) = &layer.shapes {
             let shape_nodes = self.process_shapes(shapes, self.frame - layer.st, evaluator.as_deref_mut());
@@ -385,7 +397,7 @@ impl<'a> SceneGraphBuilder<'a> {
                 self.frame - layer.st,
                 |v| v.clone(),
                 data::TextDocument::default(),
-                evaluator.as_deref_mut(), self.model.fr
+                evaluator.as_deref_mut(), self.asset.frame_rate
             );
 
             let base_fill_color = Vec4::new(doc.fc[0], doc.fc[1], doc.fc[2], 1.0);
@@ -438,21 +450,21 @@ impl<'a> SceneGraphBuilder<'a> {
                         self.frame - layer.st,
                         |v| *v,
                         0.0,
-                        evaluator.as_deref_mut(), self.model.fr
+                        evaluator.as_deref_mut(), self.asset.frame_rate
                     );
                     let end_val = Animator::resolve(
                         sel.e.as_ref().unwrap_or(&data::Property::default()),
                         self.frame - layer.st,
                         |v| *v,
                         100.0,
-                        evaluator.as_deref_mut(), self.model.fr
+                        evaluator.as_deref_mut(), self.asset.frame_rate
                     );
                     let offset_val = Animator::resolve(
                         sel.o.as_ref().unwrap_or(&data::Property::default()),
                         self.frame - layer.st,
                         |v| *v,
                         0.0,
-                        evaluator.as_deref_mut(), self.model.fr
+                        evaluator.as_deref_mut(), self.asset.frame_rate
                     );
 
                     let start_idx = char_count as f32 * start_val / 100.0;
@@ -465,21 +477,21 @@ impl<'a> SceneGraphBuilder<'a> {
                         self.frame - layer.st,
                         |v| Vec3::from(v.0),
                         Vec3::ZERO,
-                        evaluator.as_deref_mut(), self.model.fr
+                        evaluator.as_deref_mut(), self.asset.frame_rate
                     );
                     let s_val = Animator::resolve(
                         style.s.as_ref().unwrap_or(&data::Property::default()),
                         self.frame - layer.st,
                         |v| Vec3::from(v.0) / 100.0,
                         Vec3::ONE,
-                        evaluator.as_deref_mut(), self.model.fr
+                        evaluator.as_deref_mut(), self.asset.frame_rate
                     );
                     let o_val = Animator::resolve(
                         style.o.as_ref().unwrap_or(&data::Property::default()),
                         self.frame - layer.st,
                         |v| *v,
                         100.0,
-                        evaluator.as_deref_mut(), self.model.fr
+                        evaluator.as_deref_mut(), self.asset.frame_rate
                     );
                     // RZ
                     let r_val = Animator::resolve(
@@ -487,7 +499,7 @@ impl<'a> SceneGraphBuilder<'a> {
                         self.frame - layer.st,
                         |v| *v,
                         0.0,
-                        evaluator.as_deref_mut(), self.model.fr
+                        evaluator.as_deref_mut(), self.asset.frame_rate
                     );
 
                     // Tracking
@@ -496,7 +508,7 @@ impl<'a> SceneGraphBuilder<'a> {
                         self.frame - layer.st,
                         |v| *v,
                         0.0,
-                        evaluator.as_deref_mut(), self.model.fr
+                        evaluator.as_deref_mut(), self.asset.frame_rate
                     );
 
                     let fc_val = if let Some(fc_prop) = &style.fc {
@@ -505,7 +517,7 @@ impl<'a> SceneGraphBuilder<'a> {
                             self.frame - layer.st,
                             |v| Vec4::from_slice(v),
                             Vec4::ONE,
-                            evaluator.as_deref_mut(), self.model.fr
+                            evaluator.as_deref_mut(), self.asset.frame_rate
                         ))
                     } else {
                         None
@@ -517,7 +529,7 @@ impl<'a> SceneGraphBuilder<'a> {
                             self.frame - layer.st,
                             |v| Vec4::from_slice(v),
                             Vec4::ONE,
-                            evaluator.as_deref_mut(), self.model.fr
+                            evaluator.as_deref_mut(), self.asset.frame_rate
                         ))
                     } else {
                         None
@@ -570,7 +582,7 @@ impl<'a> SceneGraphBuilder<'a> {
             }
 
             // Layout
-            if let Some(measurer) = self.text_measurer {
+            if let Some(measurer) = self.asset.text_measurer.as_deref() {
                 let box_size = doc.sz.map(|v| Vec2::from_slice(&v));
                 let box_pos = doc.ps.map(|v| Vec2::from_slice(&v)).unwrap_or(Vec2::ZERO);
                 let tracking_val = doc.tr;
@@ -676,7 +688,7 @@ impl<'a> SceneGraphBuilder<'a> {
                              let advance = w + tracking_val + g.tracking;
                              advances.push(advance);
                              line_width += advance;
-                        }
+                         }
 
                         let start_x = match doc.j {
                             1 => -line_width,
@@ -721,11 +733,11 @@ impl<'a> SceneGraphBuilder<'a> {
                 line_height: doc.lh,
             })
         } else if let Some(ref_id) = &layer.ref_id {
-            if let Some(asset) = self.assets.get(ref_id) {
+            if let Some(asset) = self.model_assets_map.get(ref_id) {
                 if let Some(layers) = &asset.layers {
                     let local_frame = if let Some(tm_prop) = &layer.tm {
-                        let tm_sec = Animator::resolve(tm_prop, self.frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                        tm_sec * self.model.fr
+                        let tm_sec = Animator::resolve(tm_prop, self.frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                        tm_sec * self.asset.frame_rate
                     } else {
                         self.frame - layer.st
                     };
@@ -738,16 +750,14 @@ impl<'a> SceneGraphBuilder<'a> {
                     }
 
                     let mut sub_builder = SceneGraphBuilder::new(
-                        self.model,
+                        self.asset,
                         local_frame,
-                        self.external_assets,
-                        self.text_measurer,
                     );
                     let root = sub_builder.build_composition(layers, &sub_layer_map, evaluator.as_deref_mut());
                     root.content
                 } else {
                     let data = if let Some(ImageSource::Data(bytes)) =
-                        self.external_assets.get(&asset.id)
+                        self.asset.assets.get(&asset.id)
                     {
                         Some(bytes.clone())
                     } else if let Some(p) = &asset.p {
@@ -856,39 +866,39 @@ impl<'a> SceneGraphBuilder<'a> {
                     match k {
                         "DropShadow" => {
                              let color = self.resolve_json_vec4_arr(&sy.c, self.frame - layer.st, evaluator.as_deref_mut());
-                             let opacity = Animator::resolve(&sy.o, self.frame - layer.st, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.model.fr);
-                             let angle = Animator::resolve(&sy.a, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                             let distance = Animator::resolve(&sy.d, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                             let size = Animator::resolve(&sy.s, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                             let spread = Animator::resolve(&sy.ch, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
+                             let opacity = Animator::resolve(&sy.o, self.frame - layer.st, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                             let angle = Animator::resolve(&sy.a, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                             let distance = Animator::resolve(&sy.d, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                             let size = Animator::resolve(&sy.s, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                             let spread = Animator::resolve(&sy.ch, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
                              styles.push(LayerStyle::DropShadow {
                                  color, opacity, angle, distance, size, spread
                              });
                         },
                         "InnerShadow" => {
                              let color = self.resolve_json_vec4_arr(&sy.c, self.frame - layer.st, evaluator.as_deref_mut());
-                             let opacity = Animator::resolve(&sy.o, self.frame - layer.st, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.model.fr);
-                             let angle = Animator::resolve(&sy.a, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                             let distance = Animator::resolve(&sy.d, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                             let size = Animator::resolve(&sy.s, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                             let choke = Animator::resolve(&sy.ch, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
+                             let opacity = Animator::resolve(&sy.o, self.frame - layer.st, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                             let angle = Animator::resolve(&sy.a, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                             let distance = Animator::resolve(&sy.d, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                             let size = Animator::resolve(&sy.s, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                             let choke = Animator::resolve(&sy.ch, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
                              styles.push(LayerStyle::InnerShadow {
                                  color, opacity, angle, distance, size, choke
                              });
                         },
                         "OuterGlow" => {
                              let color = self.resolve_json_vec4_arr(&sy.c, self.frame - layer.st, evaluator.as_deref_mut());
-                             let opacity = Animator::resolve(&sy.o, self.frame - layer.st, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.model.fr);
-                             let size = Animator::resolve(&sy.s, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                             let range = Animator::resolve(&sy.ch, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
+                             let opacity = Animator::resolve(&sy.o, self.frame - layer.st, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                             let size = Animator::resolve(&sy.s, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                             let range = Animator::resolve(&sy.ch, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
                              styles.push(LayerStyle::OuterGlow {
                                  color, opacity, size, range
                              });
                         },
                         "Stroke" => {
                              let color = self.resolve_json_vec4_arr(&sy.c, self.frame - layer.st, evaluator.as_deref_mut());
-                             let opacity = Animator::resolve(&sy.o, self.frame - layer.st, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.model.fr);
-                             let width = Animator::resolve(&sy.s, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
+                             let opacity = Animator::resolve(&sy.o, self.frame - layer.st, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                             let width = Animator::resolve(&sy.s, self.frame - layer.st, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
                              styles.push(LayerStyle::Stroke {
                                  color, width, opacity
                              });
@@ -994,7 +1004,7 @@ impl<'a> SceneGraphBuilder<'a> {
             if let Some(n) = v.as_f64() { n as f32 }
             else if let Some(arr) = v.as_array() { arr.get(0).and_then(|x| x.as_f64()).unwrap_or(0.0) as f32 }
             else { 0.0 }
-        }, 0.0, evaluator, self.model.fr)
+        }, 0.0, evaluator, self.asset.frame_rate)
     }
 
     fn resolve_json_vec4(&self, prop: &data::Property<serde_json::Value>, frame: f32, #[cfg(feature = "expressions")] evaluator: Option<&mut ExpressionEvaluator>, #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>) -> Vec4 {
@@ -1006,7 +1016,7 @@ impl<'a> SceneGraphBuilder<'a> {
                 let a = arr.get(3).and_then(|x| x.as_f64()).unwrap_or(1.0) as f32;
                 Vec4::new(r, g, b, a)
             } else { Vec4::ZERO }
-        }, Vec4::ZERO, evaluator, self.model.fr)
+        }, Vec4::ZERO, evaluator, self.asset.frame_rate)
     }
 
     fn resolve_json_vec4_arr(&self, prop: &data::Property<Vec<f32>>, frame: f32, #[cfg(feature = "expressions")] evaluator: Option<&mut ExpressionEvaluator>, #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>) -> Vec4 {
@@ -1014,7 +1024,7 @@ impl<'a> SceneGraphBuilder<'a> {
             if v.len() >= 4 { Vec4::new(v[0], v[1], v[2], v[3]) }
             else if v.len() >= 3 { Vec4::new(v[0], v[1], v[2], 1.0) }
             else { Vec4::ZERO }
-        }, Vec4::ONE, evaluator, self.model.fr)
+        }, Vec4::ONE, evaluator, self.asset.frame_rate)
     }
 
     fn resolve_transform(&self, layer: &data::Layer, map: &HashMap<u32, &data::Layer>, #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>, #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>) -> Mat4 {
@@ -1037,17 +1047,17 @@ impl<'a> SceneGraphBuilder<'a> {
         if layer.ty == 13 {
              // Position
              let pos = match &ks.p {
-                 data::PositionProperty::Unified(p) => Animator::resolve(p, t_frame, |v| Vec3::from(v.0), Vec3::ZERO, evaluator.as_deref_mut(), self.model.fr),
+                 data::PositionProperty::Unified(p) => Animator::resolve(p, t_frame, |v| Vec3::from(v.0), Vec3::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate),
                  data::PositionProperty::Split { x, y, z } => {
-                     let px = Animator::resolve(x, t_frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                     let py = Animator::resolve(y, t_frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                     let pz = if let Some(z_prop) = z { Animator::resolve(z_prop, t_frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr) } else { 0.0 };
+                     let px = Animator::resolve(x, t_frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                     let py = Animator::resolve(y, t_frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                     let pz = if let Some(z_prop) = z { Animator::resolve(z_prop, t_frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate) } else { 0.0 };
                      Vec3::new(px, py, pz)
                  }
              };
 
              // Point of Interest (Anchor)
-             let anchor = Animator::resolve(&ks.a, t_frame, |v| Vec3::from(v.0), Vec3::ZERO, evaluator.as_deref_mut(), self.model.fr);
+             let anchor = Animator::resolve(&ks.a, t_frame, |v| Vec3::from(v.0), Vec3::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate);
 
              // Use LookAt logic
              // View = LookAt(pos, anchor, up)
@@ -1067,7 +1077,7 @@ impl<'a> SceneGraphBuilder<'a> {
              // If we apply roll, it is around the local Z axis.
              // Camera looks down -Z.
              // Roll Z means rotate around Z.
-             let rz = Animator::resolve(&ks.rz, t_frame, |v| v.to_radians(), 0.0, evaluator.as_deref_mut(), self.model.fr);
+             let rz = Animator::resolve(&ks.rz, t_frame, |v| v.to_radians(), 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
              // Inverse of (Roll * View) ? No.
              // Camera Transform = (RotZ * View).inverse() ?
              // Or Transform = View.inverse() * RotZ?
@@ -1075,32 +1085,32 @@ impl<'a> SceneGraphBuilder<'a> {
              return view.inverse() * Mat4::from_rotation_z(rz);
         }
 
-        let mut anchor = Animator::resolve(&ks.a, t_frame, |v| Vec3::from(v.0), Vec3::ZERO, evaluator.as_deref_mut(), self.model.fr);
+        let mut anchor = Animator::resolve(&ks.a, t_frame, |v| Vec3::from(v.0), Vec3::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate);
 
         let mut pos = match &ks.p {
             data::PositionProperty::Unified(p) => {
-                Animator::resolve(p, t_frame, |v| Vec3::from(v.0), Vec3::ZERO, evaluator.as_deref_mut(), self.model.fr)
+                Animator::resolve(p, t_frame, |v| Vec3::from(v.0), Vec3::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate)
             }
             data::PositionProperty::Split { x, y, z } => {
-                let px = Animator::resolve(x, t_frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                let py = Animator::resolve(y, t_frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
+                let px = Animator::resolve(x, t_frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                let py = Animator::resolve(y, t_frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
                 let pz = if let Some(z_prop) = z {
-                    Animator::resolve(z_prop, t_frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr)
+                    Animator::resolve(z_prop, t_frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate)
                 } else { 0.0 };
                 Vec3::new(px, py, pz)
             }
         };
 
-        let scale = Animator::resolve(&ks.s, t_frame, |v| Vec3::from(v.0) / 100.0, Vec3::ONE, evaluator.as_deref_mut(), self.model.fr);
+        let scale = Animator::resolve(&ks.s, t_frame, |v| Vec3::from(v.0) / 100.0, Vec3::ONE, evaluator.as_deref_mut(), self.asset.frame_rate);
 
-        let rz = Animator::resolve(&ks.rz, t_frame, |v| v.to_radians(), 0.0, evaluator.as_deref_mut(), self.model.fr);
+        let rz = Animator::resolve(&ks.rz, t_frame, |v| v.to_radians(), 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
         let mut rx = 0.0;
         let mut ry = 0.0;
-        if let Some(p) = &ks.rx { rx = Animator::resolve(p, t_frame, |v| v.to_radians(), 0.0, evaluator.as_deref_mut(), self.model.fr); }
-        if let Some(p) = &ks.ry { ry = Animator::resolve(p, t_frame, |v| v.to_radians(), 0.0, evaluator.as_deref_mut(), self.model.fr); }
+        if let Some(p) = &ks.rx { rx = Animator::resolve(p, t_frame, |v| v.to_radians(), 0.0, evaluator.as_deref_mut(), self.asset.frame_rate); }
+        if let Some(p) = &ks.ry { ry = Animator::resolve(p, t_frame, |v| v.to_radians(), 0.0, evaluator.as_deref_mut(), self.asset.frame_rate); }
 
         let mut orientation = if let Some(or) = &ks.or {
-            Animator::resolve(or, t_frame, |v| Vec3::from(v.0), Vec3::ZERO, evaluator.as_deref_mut(), self.model.fr)
+            Animator::resolve(or, t_frame, |v| Vec3::from(v.0), Vec3::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate)
         } else {
             Vec3::ZERO
         };
@@ -1138,28 +1148,28 @@ impl<'a> SceneGraphBuilder<'a> {
     // Shapes logic must remain 2D (Mat3)
     fn get_shape_transform_2d(&self, ks: &data::Transform, frame: f32, #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>, #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>) -> Mat3 {
          // Anchor (2D)
-         let anchor_3d = Animator::resolve(&ks.a, frame, |v| Vec3::from(v.0), Vec3::ZERO, evaluator.as_deref_mut(), self.model.fr);
+         let anchor_3d = Animator::resolve(&ks.a, frame, |v| Vec3::from(v.0), Vec3::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate);
          let anchor = Vec2::new(anchor_3d.x, anchor_3d.y);
 
          // Position (2D)
          let pos = match &ks.p {
              data::PositionProperty::Unified(p) => {
-                 let v3 = Animator::resolve(p, frame, |v| Vec3::from(v.0), Vec3::ZERO, evaluator.as_deref_mut(), self.model.fr);
+                 let v3 = Animator::resolve(p, frame, |v| Vec3::from(v.0), Vec3::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate);
                  Vec2::new(v3.x, v3.y)
              }
              data::PositionProperty::Split { x, y, .. } => {
-                 let px = Animator::resolve(x, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                 let py = Animator::resolve(y, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
+                 let px = Animator::resolve(x, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                 let py = Animator::resolve(y, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
                  Vec2::new(px, py)
              }
          };
 
          // Scale (2D)
-         let s3 = Animator::resolve(&ks.s, frame, |v| Vec3::from(v.0) / 100.0, Vec3::ONE, evaluator.as_deref_mut(), self.model.fr);
+         let s3 = Animator::resolve(&ks.s, frame, |v| Vec3::from(v.0) / 100.0, Vec3::ONE, evaluator.as_deref_mut(), self.asset.frame_rate);
          let scale = Vec2::new(s3.x, s3.y);
 
          // Rotation (Z)
-         let r = Animator::resolve(&ks.rz, frame, |v| v.to_radians(), 0.0, evaluator.as_deref_mut(), self.model.fr);
+         let r = Animator::resolve(&ks.rz, frame, |v| v.to_radians(), 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
 
          let mat_t = Mat3::from_translation(pos);
          let mat_r = Mat3::from_rotation_z(r);
@@ -1176,9 +1186,9 @@ impl<'a> SceneGraphBuilder<'a> {
         let mut trim: Option<Trim> = None;
         for item in shapes {
             if let data::Shape::Trim(t) = item {
-                let s = Animator::resolve(&t.s, frame, |v| *v / 100.0, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                let e = Animator::resolve(&t.e, frame, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.model.fr);
-                let o = Animator::resolve(&t.o, frame, |v| *v / 360.0, 0.0, evaluator.as_deref_mut(), self.model.fr);
+                let s = Animator::resolve(&t.s, frame, |v| *v / 100.0, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                let e = Animator::resolve(&t.e, frame, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                let o = Animator::resolve(&t.o, frame, |v| *v / 360.0, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
                 trim = Some(Trim { start: s, end: e, offset: o });
             }
         }
@@ -1207,17 +1217,17 @@ impl<'a> SceneGraphBuilder<'a> {
                     });
                 }
                 data::Shape::Rect(r) => {
-                    let size = Animator::resolve(&r.s, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.model.fr);
-                    let pos = Animator::resolve(&r.p, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.model.fr);
-                    let radius = Animator::resolve(&r.r, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
+                    let size = Animator::resolve(&r.s, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let pos = Animator::resolve(&r.p, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let radius = Animator::resolve(&r.r, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
                     active_geometries.push(PendingGeometry {
                         kind: GeometryKind::Rect { size, pos, radius },
                         transform: Mat3::IDENTITY,
                     });
                 }
                 data::Shape::Ellipse(e) => {
-                    let size = Animator::resolve(&e.s, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.model.fr);
-                    let pos = Animator::resolve(&e.p, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.model.fr);
+                    let size = Animator::resolve(&e.s, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let pos = Animator::resolve(&e.p, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate);
                     active_geometries.push(PendingGeometry {
                         kind: GeometryKind::Ellipse { size, pos },
                         transform: Mat3::IDENTITY,
@@ -1225,19 +1235,19 @@ impl<'a> SceneGraphBuilder<'a> {
                 }
                 data::Shape::Polystar(sr) => {
                     let pos = match &sr.p {
-                        data::PositionProperty::Unified(p) => Animator::resolve(p, 0.0, |v| Vec2::from_slice(&v.0[0..2]), Vec2::ZERO, evaluator.as_deref_mut(), self.model.fr),
+                        data::PositionProperty::Unified(p) => Animator::resolve(p, 0.0, |v| Vec2::from_slice(&v.0[0..2]), Vec2::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate),
                         data::PositionProperty::Split { x, y, .. } => {
-                            let px = Animator::resolve(x, 0.0, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                            let py = Animator::resolve(y, 0.0, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
+                            let px = Animator::resolve(x, 0.0, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                            let py = Animator::resolve(y, 0.0, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
                             Vec2::new(px, py)
                         }
                     };
-                    let or = Animator::resolve(&sr.or, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                    let os = Animator::resolve(&sr.os, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                    let r = Animator::resolve(&sr.r, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                    let pt = Animator::resolve(&sr.pt, frame, |v| *v, 5.0, evaluator.as_deref_mut(), self.model.fr);
-                    let ir = if let Some(prop) = &sr.ir { Animator::resolve(prop, 0.0, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr) } else { 0.0 };
-                    let is = if let Some(prop) = &sr.is { Animator::resolve(prop, 0.0, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr) } else { 0.0 };
+                    let or = Animator::resolve(&sr.or, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let os = Animator::resolve(&sr.os, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let r = Animator::resolve(&sr.r, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let pt = Animator::resolve(&sr.pt, frame, |v| *v, 5.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let ir = if let Some(prop) = &sr.ir { Animator::resolve(prop, 0.0, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate) } else { 0.0 };
+                    let is = if let Some(prop) = &sr.is { Animator::resolve(prop, 0.0, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate) } else { 0.0 };
 
                     active_geometries.push(PendingGeometry {
                         kind: GeometryKind::Polystar(PolystarParams {
@@ -1255,7 +1265,7 @@ impl<'a> SceneGraphBuilder<'a> {
                     }
                 }
                 data::Shape::RoundCorners(rd) => {
-                    let r = Animator::resolve(&rd.r, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
+                    let r = Animator::resolve(&rd.r, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
                     if r > 0.0 {
                         for geom in &mut active_geometries {
                             match &mut geom.kind {
@@ -1267,67 +1277,67 @@ impl<'a> SceneGraphBuilder<'a> {
                     }
                 }
                 data::Shape::ZigZag(zz) => {
-                    let ridges = Animator::resolve(&zz.r, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                    let size = Animator::resolve(&zz.s, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                    let pt = Animator::resolve(&zz.pt, frame, |v| *v, 1.0, evaluator.as_deref_mut(), self.model.fr);
+                    let ridges = Animator::resolve(&zz.r, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let size = Animator::resolve(&zz.s, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let pt = Animator::resolve(&zz.pt, frame, |v| *v, 1.0, evaluator.as_deref_mut(), self.asset.frame_rate);
                     let modifier = ZigZagModifier { ridges, size, smooth: pt > 1.5 };
                     self.apply_modifier_to_active(&mut active_geometries, &modifier);
                 }
                 data::Shape::PuckerBloat(pb) => {
-                    let amount = Animator::resolve(&pb.a, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
+                    let amount = Animator::resolve(&pb.a, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
                     let modifier = PuckerBloatModifier { amount, center: Vec2::ZERO };
                     self.apply_modifier_to_active(&mut active_geometries, &modifier);
                 }
                 data::Shape::Twist(tw) => {
-                    let angle = Animator::resolve(&tw.a, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                    let center = Animator::resolve(&tw.c, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.model.fr);
+                    let angle = Animator::resolve(&tw.a, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let center = Animator::resolve(&tw.c, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate);
                     let modifier = TwistModifier { angle, center };
                     self.apply_modifier_to_active(&mut active_geometries, &modifier);
                 }
                 data::Shape::OffsetPath(op) => {
-                    let amount = Animator::resolve(&op.a, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
+                    let amount = Animator::resolve(&op.a, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
                     let miter_limit = op.ml.unwrap_or(4.0);
                     let line_join = op.lj;
                     let modifier = OffsetPathModifier { amount, miter_limit, line_join };
                     self.apply_modifier_to_active(&mut active_geometries, &modifier);
                 }
                 data::Shape::WigglePath(wg) => {
-                    let speed = Animator::resolve(&wg.s, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                    let size = Animator::resolve(&wg.w, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                    let correlation = Animator::resolve(&wg.r, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                    let seed_prop = Animator::resolve(&wg.sh, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                    let mut modifier = WiggleModifier { seed: seed_prop, time: frame / 60.0, speed: speed / self.model.fr, amount: size, correlation };
+                    let speed = Animator::resolve(&wg.s, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let size = Animator::resolve(&wg.w, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let correlation = Animator::resolve(&wg.r, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let seed_prop = Animator::resolve(&wg.sh, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let mut modifier = WiggleModifier { seed: seed_prop, time: frame / 60.0, speed: speed / self.asset.frame_rate, amount: size, correlation };
                     modifier.time = frame;
-                    modifier.speed = speed / self.model.fr;
+                    modifier.speed = speed / self.asset.frame_rate;
                     self.apply_modifier_to_active(&mut active_geometries, &modifier);
                 }
                 data::Shape::Repeater(rp) => {
-                    let copies = Animator::resolve(&rp.c, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                    let offset = Animator::resolve(&rp.o, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                    let t_anchor_3d = Animator::resolve(&rp.tr.t.a, frame, |v| Vec3::from(v.0), Vec3::ZERO, evaluator.as_deref_mut(), self.model.fr);
+                    let copies = Animator::resolve(&rp.c, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let offset = Animator::resolve(&rp.o, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let t_anchor_3d = Animator::resolve(&rp.tr.t.a, frame, |v| Vec3::from(v.0), Vec3::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate);
                     let t_anchor = Vec2::new(t_anchor_3d.x, t_anchor_3d.y);
 
                     let t_pos = match &rp.tr.t.p {
-                        data::PositionProperty::Unified(p) => Animator::resolve(p, 0.0, |v| Vec2::from_slice(&v.0[0..2]), Vec2::ZERO, evaluator.as_deref_mut(), self.model.fr),
+                        data::PositionProperty::Unified(p) => Animator::resolve(p, 0.0, |v| Vec2::from_slice(&v.0[0..2]), Vec2::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate),
                         data::PositionProperty::Split { x, y, .. } => {
-                            let px = Animator::resolve(x, 0.0, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
-                            let py = Animator::resolve(y, 0.0, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
+                            let px = Animator::resolve(x, 0.0, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                            let py = Animator::resolve(y, 0.0, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
                             Vec2::new(px, py)
                         }
                     };
-                    let t_scale_3d = Animator::resolve(&rp.tr.t.s, 0.0, |v| Vec3::from(v.0) / 100.0, Vec3::ONE, evaluator.as_deref_mut(), self.model.fr);
+                    let t_scale_3d = Animator::resolve(&rp.tr.t.s, 0.0, |v| Vec3::from(v.0) / 100.0, Vec3::ONE, evaluator.as_deref_mut(), self.asset.frame_rate);
                     let t_scale = Vec2::new(t_scale_3d.x, t_scale_3d.y);
 
-                    let t_rot = Animator::resolve(&rp.tr.t.rz, frame, |v| v.to_radians(), 0.0, evaluator.as_deref_mut(), self.model.fr);
+                    let t_rot = Animator::resolve(&rp.tr.t.rz, frame, |v| v.to_radians(), 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
 
-                    let start_opacity = Animator::resolve(&rp.tr.so, frame, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.model.fr);
-                    let end_opacity = Animator::resolve(&rp.tr.eo, frame, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.model.fr);
+                    let start_opacity = Animator::resolve(&rp.tr.so, frame, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let end_opacity = Animator::resolve(&rp.tr.eo, frame, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.asset.frame_rate);
 
                     self.apply_repeater(copies, offset, t_anchor, t_pos, t_scale, t_rot, start_opacity, end_opacity, &mut active_geometries, &mut processed_nodes);
                 }
                 data::Shape::Fill(f) => {
-                    let color = Animator::resolve(&f.c, frame, |v| Vec4::from_slice(v), Vec4::ONE, evaluator.as_deref_mut(), self.model.fr);
-                    let opacity = Animator::resolve(&f.o, frame, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.model.fr);
+                    let color = Animator::resolve(&f.c, frame, |v| Vec4::from_slice(v), Vec4::ONE, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let opacity = Animator::resolve(&f.o, frame, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.asset.frame_rate);
                     for geom in &active_geometries {
                         let path = self.convert_geometry(geom);
                         processed_nodes.push(RenderNode {
@@ -1343,10 +1353,10 @@ impl<'a> SceneGraphBuilder<'a> {
                     }
                 }
                 data::Shape::GradientFill(gf) => {
-                    let start = Animator::resolve(&gf.s, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.model.fr);
-                    let end = Animator::resolve(&gf.e, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.model.fr);
-                    let opacity = Animator::resolve(&gf.o, frame, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.model.fr);
-                    let raw_stops = Animator::resolve(&gf.g.k, frame, |v| v.clone(), Vec::new(), evaluator.as_deref_mut(), self.model.fr);
+                    let start = Animator::resolve(&gf.s, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let end = Animator::resolve(&gf.e, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let opacity = Animator::resolve(&gf.o, frame, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let raw_stops = Animator::resolve(&gf.g.k, frame, |v| v.clone(), Vec::new(), evaluator.as_deref_mut(), self.asset.frame_rate);
                     let stops = parse_gradient_stops(&raw_stops, gf.g.p as usize);
                     let kind = if gf.t == 1 { GradientKind::Linear } else { GradientKind::Radial };
                     for geom in &active_geometries {
@@ -1364,11 +1374,11 @@ impl<'a> SceneGraphBuilder<'a> {
                     }
                 }
                 data::Shape::GradientStroke(gs) => {
-                    let start = Animator::resolve(&gs.s, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.model.fr);
-                    let end = Animator::resolve(&gs.e, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.model.fr);
-                    let width = Animator::resolve(&gs.w, frame, |v| *v, 1.0, evaluator.as_deref_mut(), self.model.fr);
-                    let opacity = Animator::resolve(&gs.o, frame, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.model.fr);
-                    let raw_stops = Animator::resolve(&gs.g.k, frame, |v| v.clone(), Vec::new(), evaluator.as_deref_mut(), self.model.fr);
+                    let start = Animator::resolve(&gs.s, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let end = Animator::resolve(&gs.e, frame, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let width = Animator::resolve(&gs.w, frame, |v| *v, 1.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let opacity = Animator::resolve(&gs.o, frame, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let raw_stops = Animator::resolve(&gs.g.k, frame, |v| v.clone(), Vec::new(), evaluator.as_deref_mut(), self.asset.frame_rate);
                     let stops = parse_gradient_stops(&raw_stops, gs.g.p as usize);
                     let kind = if gs.t == 1 { GradientKind::Linear } else { GradientKind::Radial };
                     let dash = self.resolve_dash(&gs.d, frame, evaluator.as_deref_mut());
@@ -1388,9 +1398,9 @@ impl<'a> SceneGraphBuilder<'a> {
                     }
                 }
                 data::Shape::Stroke(s) => {
-                    let color = Animator::resolve(&s.c, frame, |v| Vec4::from_slice(v), Vec4::ONE, evaluator.as_deref_mut(), self.model.fr);
-                    let width = Animator::resolve(&s.w, frame, |v| *v, 1.0, evaluator.as_deref_mut(), self.model.fr);
-                    let opacity = Animator::resolve(&s.o, frame, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.model.fr);
+                    let color = Animator::resolve(&s.c, frame, |v| Vec4::from_slice(v), Vec4::ONE, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let width = Animator::resolve(&s.w, frame, |v| *v, 1.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+                    let opacity = Animator::resolve(&s.o, frame, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.asset.frame_rate);
                     let dash = self.resolve_dash(&s.d, frame, evaluator.as_deref_mut());
                     for geom in &active_geometries {
                         let path = self.convert_geometry(geom);
@@ -1428,8 +1438,8 @@ impl<'a> SceneGraphBuilder<'a> {
         let mut offset = 0.0;
         for prop in props {
             match prop.n.as_deref() {
-                Some("o") => offset = Animator::resolve(&prop.v, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr),
-                Some("d") | Some("v") | Some("g") => array.push(Animator::resolve(&prop.v, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr)),
+                Some("o") => offset = Animator::resolve(&prop.v, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate),
+                Some("d") | Some("v") | Some("g") => array.push(Animator::resolve(&prop.v, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate)),
                 _ => {}
             }
         }
@@ -1628,7 +1638,7 @@ impl<'a> SceneGraphBuilder<'a> {
     }
 
     fn convert_path(&self, p: &data::PathShape, frame: f32, #[cfg(feature = "expressions")] evaluator: Option<&mut ExpressionEvaluator>, #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>) -> BezPath {
-        let path_data = Animator::resolve(&p.ks, frame, |v| v.clone(), data::BezierPath::default(), evaluator, self.model.fr);
+        let path_data = Animator::resolve(&p.ks, frame, |v| v.clone(), data::BezierPath::default(), evaluator, self.asset.frame_rate);
         self.convert_bezier_path(&path_data)
     }
 
@@ -1660,10 +1670,10 @@ impl<'a> SceneGraphBuilder<'a> {
                 Some("i") => MaskMode::Intersect, Some("l") => MaskMode::Lighten, Some("d") => MaskMode::Darken,
                 Some("f") => MaskMode::Difference, _ => continue,
             };
-            let path_data = Animator::resolve(&m.pt, frame, |v| v.clone(), data::BezierPath::default(), evaluator.as_deref_mut(), self.model.fr);
+            let path_data = Animator::resolve(&m.pt, frame, |v| v.clone(), data::BezierPath::default(), evaluator.as_deref_mut(), self.asset.frame_rate);
             let geometry = self.convert_bezier_path(&path_data);
-            let opacity = Animator::resolve(&m.o, frame, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.model.fr);
-            let expansion = Animator::resolve(&m.x, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.model.fr);
+            let opacity = Animator::resolve(&m.o, frame, |v| *v / 100.0, 1.0, evaluator.as_deref_mut(), self.asset.frame_rate);
+            let expansion = Animator::resolve(&m.x, frame, |v| *v, 0.0, evaluator.as_deref_mut(), self.asset.frame_rate);
             let inverted = m.inv;
             masks.push(Mask { mode, geometry, opacity, expansion, inverted });
         }
@@ -1781,7 +1791,7 @@ mod tests {
         };
 
         let mut player = LottiePlayer::new();
-        player.load(model);
+        player.load_json(model);
         let tree = player.render_tree();
 
         let vm = tree.view_matrix;
