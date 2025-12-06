@@ -1,5 +1,5 @@
 use crate::element::Element;
-use skia_safe::{Canvas, Rect, Image};
+use skia_safe::{Canvas, Rect, Image, Paint, SamplingOptions, surfaces, ImageInfo, ColorType, AlphaType, Color};
 use taffy::style::Style;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
@@ -40,10 +40,13 @@ pub struct LottieNode {
     pub speed: f32,
     pub loop_anim: bool,
     pub asset_manager: Arc<LottieAssetManager>,
+    // Cache: (frame, width, height, image)
+    cache: Mutex<Option<(f32, u32, u32, Image)>>,
 }
 
 impl std::fmt::Debug for LottieNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let cache_state = if self.cache.lock().unwrap().is_some() { "Some" } else { "None" };
         f.debug_struct("LottieNode")
          .field("style", &self.style)
          .field("opacity", &self.opacity)
@@ -51,6 +54,7 @@ impl std::fmt::Debug for LottieNode {
          .field("speed", &self.speed)
          .field("loop_anim", &self.loop_anim)
          .field("asset_manager", &self.asset_manager)
+         .field("cache", &cache_state)
          .finish()
     }
 }
@@ -69,6 +73,7 @@ impl Clone for LottieNode {
             speed: self.speed,
             loop_anim: self.loop_anim,
             asset_manager: self.asset_manager.clone(),
+            cache: Mutex::new(None),
         }
     }
 }
@@ -91,6 +96,7 @@ impl LottieNode {
             speed: 1.0,
             loop_anim: false,
             asset_manager: Arc::new(LottieAssetManager { images: assets }),
+            cache: Mutex::new(None),
         })
     }
 }
@@ -140,10 +146,80 @@ impl Element for LottieNode {
 
     fn render(&self, canvas: &Canvas, rect: Rect, parent_opacity: f32, _draw_children: &mut dyn FnMut(&Canvas)) {
         let mut player = self.player.lock().unwrap();
-        let tree = player.render_tree();
+        let current_frame = player.current_frame;
         let final_opacity = self.opacity.current_value * parent_opacity;
 
-        SkiaRenderer::draw(canvas, &tree, rect, final_opacity, &*self.asset_manager);
+        // Skip rendering if fully transparent
+        if final_opacity <= 0.0 {
+            return;
+        }
+
+        // Determine integer dimensions for the cache
+        let w = rect.width().ceil() as i32;
+        let h = rect.height().ceil() as i32;
+
+        if w <= 0 || h <= 0 {
+            return;
+        }
+
+        let w_u32 = w as u32;
+        let h_u32 = h as u32;
+
+        let mut cache = self.cache.lock().unwrap();
+
+        // Check cache hit
+        let hit = if let Some((cached_frame, cached_w, cached_h, _)) = cache.as_ref() {
+             (current_frame - cached_frame).abs() < 0.01 && *cached_w == w_u32 && *cached_h == h_u32
+        } else {
+            false
+        };
+
+        let image = if hit {
+             cache.as_ref().unwrap().3.clone()
+        } else {
+            // Miss: Render to surface
+            let image_info = ImageInfo::new(
+                (w, h),
+                ColorType::RGBA8888,
+                AlphaType::Premul,
+                None
+            );
+
+            // Try make_surface from canvas (GPU friendly)
+            // Note: canvas.make_surface is not available in safe bindings directly or has different name.
+            // Using raster fallback for now.
+            let mut surface = surfaces::raster(&image_info, None, None).expect("Failed to create raster surface");
+
+            // Clear surface
+            surface.canvas().clear(Color::TRANSPARENT);
+
+            // Render Lottie to surface
+            let tree = player.render_tree();
+            let draw_rect = Rect::from_wh(w as f32, h as f32);
+
+            // Draw with alpha 1.0
+            SkiaRenderer::draw(surface.canvas(), &tree, draw_rect, 1.0, &*self.asset_manager);
+
+            let img = surface.image_snapshot();
+
+            // Update cache
+            *cache = Some((current_frame, w_u32, h_u32, img.clone()));
+            img
+        };
+
+        // Draw cached image to main canvas
+        let mut paint = Paint::default();
+        paint.set_alpha_f(final_opacity);
+
+        let sampling = SamplingOptions::default();
+
+        canvas.draw_image_rect_with_sampling_options(
+            &image,
+            None,
+            rect,
+            sampling,
+            &paint,
+        );
     }
 
     fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str) {
