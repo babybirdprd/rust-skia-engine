@@ -871,7 +871,7 @@ impl Element for TextNode {
 
                      // Fallback
                      let typeface = typeface_opt.unwrap_or_else(|| {
-                         let mgr = FontMgr::default();
+                         let mgr = FontMgr::new();
                          mgr.match_family_style("Sans Serif", FontStyle::normal()).unwrap()
                      });
 
