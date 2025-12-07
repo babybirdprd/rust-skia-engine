@@ -10,7 +10,7 @@ use crate::animation::{Animated, EasingType};
 use crate::director::Director;
 use crate::layout::LayoutEngine;
 use crate::render::render_recursive;
-use cosmic_text::{Buffer, FontSystem, Metrics, SwashCache, Attrs, AttrsList, Shaping, Weight, Style as CosmicStyle, Family};
+use cosmic_text::{Buffer, FontSystem, Metrics, SwashCache, Attrs, AttrsList, Shaping, Weight, Style as CosmicStyle, Family, fontdb::Source};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::any::Any;
@@ -413,6 +413,7 @@ pub struct TextNode {
     pub buffer: Mutex<Option<Buffer>>,
     pub font_system: Arc<Mutex<FontSystem>>,
     pub swash_cache: Arc<Mutex<SwashCache>>,
+    pub typeface_cache: Arc<Mutex<HashMap<cosmic_text::fontdb::ID, skia_safe::Typeface>>>,
     // RFC 009
     pub animators: Vec<TextAnimator>,
     pub grapheme_starts: Vec<usize>, // Byte offsets of each grapheme start
@@ -436,6 +437,7 @@ impl Clone for TextNode {
             buffer: Mutex::new(None), // Reset buffer
             font_system: self.font_system.clone(),
             swash_cache: self.swash_cache.clone(),
+            typeface_cache: self.typeface_cache.clone(),
             animators: self.animators.clone(),
             grapheme_starts: self.grapheme_starts.clone(),
             fit_mode: self.fit_mode.clone(),
@@ -460,7 +462,7 @@ impl fmt::Debug for TextNode {
 }
 
 impl TextNode {
-    pub fn new(spans: Vec<TextSpan>, font_system: Arc<Mutex<FontSystem>>, swash_cache: Arc<Mutex<SwashCache>>) -> Self {
+    pub fn new(spans: Vec<TextSpan>, font_system: Arc<Mutex<FontSystem>>, swash_cache: Arc<Mutex<SwashCache>>, typeface_cache: Arc<Mutex<HashMap<cosmic_text::fontdb::ID, skia_safe::Typeface>>>) -> Self {
         let mut node = Self {
             spans,
             default_font_size: Animated::new(20.0),
@@ -468,6 +470,7 @@ impl TextNode {
             buffer: Mutex::new(None),
             font_system: font_system.clone(),
             swash_cache,
+            typeface_cache,
             animators: Vec::new(),
             grapheme_starts: Vec::new(),
             fit_mode: TextFit::None,
@@ -831,21 +834,47 @@ impl Element for TextNode {
 
                      // 4. Resolve Style
                      let size = span.font_size.unwrap_or(self.default_font_size.current_value);
-                     let mut typeface = font.typeface();
 
-                     if span.font_weight.is_some() || span.font_style.is_some() || span.font_family.is_some() {
-                         let mgr = FontMgr::default();
-                         let family = span.font_family.as_deref().unwrap_or("Sans Serif");
-                         let weight = span.font_weight.map(|w| SkWeight::from(w as i32)).unwrap_or(SkWeight::NORMAL);
-                         let slant = if span.font_style.as_deref() == Some("italic") {
-                             SkSlant::Italic
-                         } else {
-                             SkSlant::Upright
-                         };
-                         if let Some(tf) = mgr.match_family_style(family, FontStyle::new(weight, SkWidth::NORMAL, slant)) {
-                             typeface = tf;
+                     // Check cache or load
+                     let font_id = glyph.font_id;
+                     let mut typeface_opt = {
+                         let cache = self.typeface_cache.lock().unwrap();
+                         cache.get(&font_id).cloned()
+                     };
+
+                     if typeface_opt.is_none() {
+                         // Cache miss, load from font_system
+                         let mut fs = self.font_system.lock().unwrap();
+                         if let Some(face) = fs.db().face(font_id) {
+                             let data = match &face.source {
+                                 Source::Binary(arc) => Some(Data::new_copy(arc.as_ref().as_ref())),
+                                 Source::File(path) => {
+                                     if let Ok(bytes) = std::fs::read(path) {
+                                         Some(Data::new_copy(&bytes))
+                                     } else {
+                                         None
+                                     }
+                                 },
+                                 _ => None
+                             };
+
+                             if let Some(d) = data {
+                                  let tf = FontMgr::new().new_from_data(&d, 0);
+                                  if let Some(tf) = tf {
+                                      let mut cache = self.typeface_cache.lock().unwrap();
+                                      cache.insert(font_id, tf.clone());
+                                      typeface_opt = Some(tf);
+                                  }
+                             }
                          }
                      }
+
+                     // Fallback
+                     let typeface = typeface_opt.unwrap_or_else(|| {
+                         let mgr = FontMgr::new();
+                         mgr.match_family_style("Sans Serif", FontStyle::normal()).unwrap()
+                     });
+
                      let glyph_font = skia_safe::Font::new(typeface, Some(size));
 
                      // 5. Create Blob using TextBlobBuilder (Preserve Ligatures)

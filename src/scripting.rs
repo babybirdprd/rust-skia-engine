@@ -670,7 +670,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          let mut d = parent.director.lock().unwrap();
          let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
 
-         match LottieNode::new(&bytes, HashMap::new()) {
+         match LottieNode::new(&bytes, HashMap::new(), d.asset_loader.clone()) {
              Ok(lottie_node) => {
                  let id = d.add_node(Box::new(lottie_node));
                  d.add_child(parent.id, id);
@@ -701,7 +701,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
              }
          }
 
-         match LottieNode::new(&bytes, assets_map) {
+         match LottieNode::new(&bytes, assets_map, d.asset_loader.clone()) {
              Ok(mut lottie_node) => {
                  parse_layout_style(&props, &mut lottie_node.style);
                  if let Some(v) = props.get("speed").and_then(|v| v.as_float().ok()) {
@@ -821,6 +821,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          let mut d = parent.director.lock().unwrap();
          let fs = d.font_system.clone();
          let sc = d.swash_cache.clone();
+         let tc = d.typeface_cache.clone();
 
          let spans = if let Some(c) = props.get("content") {
              parse_spans_from_dynamic(c.clone())
@@ -828,7 +829,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
              Vec::new()
          };
 
-         let mut text_node = TextNode::new(spans, fs, sc);
+         let mut text_node = TextNode::new(spans, fs, sc, tc);
 
          parse_layout_style(&props, &mut text_node.style);
 
@@ -884,6 +885,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          let mut d = scene.director.lock().unwrap();
          let fs = d.font_system.clone();
          let sc = d.swash_cache.clone();
+         let tc = d.typeface_cache.clone();
 
          let spans = if let Some(c) = props.get("content") {
              parse_spans_from_dynamic(c.clone())
@@ -891,7 +893,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
              Vec::new()
          };
 
-         let mut text_node = TextNode::new(spans, fs, sc);
+         let mut text_node = TextNode::new(spans, fs, sc, tc);
 
          parse_layout_style(&props, &mut text_node.style);
 
@@ -960,6 +962,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
              inner_director.font_system = parent.font_system.clone();
              inner_director.swash_cache = parent.swash_cache.clone();
              inner_director.shader_cache = parent.shader_cache.clone();
+             inner_director.typeface_cache = parent.typeface_cache.clone();
              inner_director.asset_loader = parent.asset_loader.clone();
          }
 
@@ -994,6 +997,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
              inner_director.font_system = parent.font_system.clone();
              inner_director.swash_cache = parent.swash_cache.clone();
              inner_director.shader_cache = parent.shader_cache.clone();
+             inner_director.typeface_cache = parent.typeface_cache.clone();
              inner_director.asset_loader = parent.asset_loader.clone();
          }
 

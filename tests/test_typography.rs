@@ -25,7 +25,8 @@ fn test_text_fit_shrink() {
     // Create TextNode manually
     let fs = director.font_system.clone();
     let sc = director.swash_cache.clone();
-    let mut text_node = TextNode::new(spans, fs, sc);
+    let tc = director.typeface_cache.clone();
+    let mut text_node = TextNode::new(spans, fs, sc, tc);
     text_node.fit_mode = TextFit::Shrink;
     text_node.min_size = 10.0;
     text_node.max_size = 100.0;
@@ -84,7 +85,8 @@ fn test_render_video_output() {
 
     let fs = director.font_system.clone();
     let sc = director.swash_cache.clone();
-    let mut text_node = TextNode::new(spans, fs, sc);
+    let tc = director.typeface_cache.clone();
+    let mut text_node = TextNode::new(spans, fs, sc, tc);
     text_node.fit_mode = TextFit::Shrink;
     text_node.min_size = 20.0;
     text_node.max_size = 200.0;

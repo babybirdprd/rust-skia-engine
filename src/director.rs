@@ -19,6 +19,7 @@ pub struct DirectorContext {
     pub font_system: Arc<Mutex<FontSystem>>,
     pub swash_cache: Arc<Mutex<SwashCache>>,
     pub shader_cache: Arc<Mutex<HashMap<String, RuntimeEffect>>>,
+    pub typeface_cache: Arc<Mutex<HashMap<cosmic_text::fontdb::ID, skia_safe::Typeface>>>,
 }
 
 #[derive(Clone)]
@@ -164,14 +165,16 @@ pub struct Director {
     pub font_system: Arc<Mutex<FontSystem>>,
     /// Shared Swash Cache (initialized once)
     pub swash_cache: Arc<Mutex<SwashCache>>,
+    /// Shared Typeface Cache (initialized once)
+    pub typeface_cache: Arc<Mutex<HashMap<cosmic_text::fontdb::ID, skia_safe::Typeface>>>,
 }
 
 impl Director {
     /// Creates a new Director instance.
     pub fn new(width: i32, height: i32, fps: u32, asset_loader: Arc<dyn AssetLoader>, render_mode: RenderMode, context: Option<DirectorContext>) -> Self {
 
-        let (font_system, swash_cache, shader_cache, loader_to_use) = if let Some(ctx) = context {
-            (ctx.font_system, ctx.swash_cache, ctx.shader_cache, ctx.asset_loader)
+        let (font_system, swash_cache, shader_cache, typeface_cache, loader_to_use) = if let Some(ctx) = context {
+            (ctx.font_system, ctx.swash_cache, ctx.shader_cache, ctx.typeface_cache, ctx.asset_loader)
         } else {
             let mut font_system = FontSystem::new();
             // Load fallback font if available
@@ -182,6 +185,7 @@ impl Director {
             (
                 Arc::new(Mutex::new(font_system)),
                 Arc::new(Mutex::new(SwashCache::new())),
+                Arc::new(Mutex::new(HashMap::new())),
                 Arc::new(Mutex::new(HashMap::new())),
                 asset_loader
             )
@@ -203,6 +207,7 @@ impl Director {
             shader_cache,
             font_system,
             swash_cache,
+            typeface_cache,
         }
     }
 

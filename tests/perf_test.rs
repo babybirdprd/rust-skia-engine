@@ -23,6 +23,7 @@ fn test_director_instantiation_performance() {
         font_system: parent.font_system.clone(),
         swash_cache: parent.swash_cache.clone(),
         shader_cache: parent.shader_cache.clone(),
+        typeface_cache: parent.typeface_cache.clone(),
     };
 
     let start_shared = Instant::now();

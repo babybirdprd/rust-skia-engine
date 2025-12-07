@@ -1,5 +1,5 @@
 use crate::element::Element;
-use skia_safe::{Canvas, Rect, Image, Paint, SamplingOptions, surfaces, ImageInfo, ColorType, AlphaType, Color};
+use skia_safe::{Canvas, Rect, Image, Paint, SamplingOptions, surfaces, ImageInfo, ColorType, AlphaType, Color, FontMgr, Data};
 use taffy::style::Style;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
@@ -8,9 +8,11 @@ use lottie_core::{LottiePlayer, LottieAsset};
 use lottie_data::model::LottieJson;
 use lottie_skia::{SkiaRenderer, LottieContext};
 use crate::animation::{Animated, EasingType};
+use crate::AssetLoader;
 
 pub struct LottieAssetManager {
     pub images: HashMap<String, Image>,
+    pub asset_loader: Arc<dyn AssetLoader>,
 }
 
 impl std::fmt::Debug for LottieAssetManager {
@@ -22,7 +24,20 @@ impl std::fmt::Debug for LottieAssetManager {
 }
 
 impl LottieContext for LottieAssetManager {
-    fn load_typeface(&self, _family: &str, _style: &str) -> Option<skia_safe::Typeface> {
+    fn load_typeface(&self, family: &str, style: &str) -> Option<skia_safe::Typeface> {
+        let candidates = vec![
+            format!("assets/{}-{}.ttf", family, style),
+            format!("assets/{}.ttf", family),
+            format!("{}-{}.ttf", family, style),
+            format!("{}.ttf", family),
+        ];
+
+        for path in candidates {
+            if let Ok(bytes) = self.asset_loader.load_bytes(&path) {
+                 let data = Data::new_copy(&bytes);
+                 return FontMgr::new().new_from_data(&data, 0);
+            }
+        }
         None
     }
 
@@ -79,7 +94,7 @@ impl Clone for LottieNode {
 }
 
 impl LottieNode {
-    pub fn new(data: &[u8], assets: HashMap<String, Image>) -> anyhow::Result<Self> {
+    pub fn new(data: &[u8], assets: HashMap<String, Image>, asset_loader: Arc<dyn AssetLoader>) -> anyhow::Result<Self> {
         let json_str = std::str::from_utf8(data)?;
         let model: LottieJson = serde_json::from_str(json_str)?;
 
@@ -95,7 +110,7 @@ impl LottieNode {
             frame: Animated::new(0.0),
             speed: 1.0,
             loop_anim: false,
-            asset_manager: Arc::new(LottieAssetManager { images: assets }),
+            asset_manager: Arc::new(LottieAssetManager { images: assets, asset_loader }),
             cache: Mutex::new(None),
         })
     }
