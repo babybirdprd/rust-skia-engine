@@ -81,6 +81,17 @@ container.add_text(#{
 });
 ```
 
+### Text Animators
+You can animate individual characters (graphemes) within a text block.
+
+```rust
+let text = scene.add_text(#{ content: "Hello", size: 100.0 });
+
+// Animate characters 0 through 5
+// Prop: "y", "scale", "rotation", "opacity"
+text.add_animator(0, 5, "y", 50.0, 0.0, 1.0, "ease_out");
+```
+
 ## 4. Animation
 
 You can animate numeric properties using `animate()`.
@@ -245,6 +256,10 @@ let image = scene.add_image("photo.jpg");
 
 // Apply basic color corrections
 image.apply_effect("grayscale");
+image.apply_effect("sepia");
+image.apply_effect("invert");
+
+// Adjustable effects
 image.apply_effect("contrast", 1.2); // Increase contrast by 20%
 image.apply_effect("brightness", 0.1); // Brighten
 image.apply_effect("blur", 10.0); // Gaussian Blur
@@ -274,4 +289,26 @@ let effect = image.apply_effect("shader", #{
 // Animate shader uniforms
 effect.animate("intensity", 0.0, 1.0, 2.0, "linear");
 effect.animate("color", [1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0], 2.0, "linear");
+```
+
+## 12. Helper Methods
+
+### Destroying Nodes
+You can manually remove a node and its children from the scene.
+```rust
+let box = scene.add_box(#{ ... });
+box.destroy();
+```
+
+### Randomness
+Generate random values for procedural generation.
+```rust
+let r = rand_float(0.0, 100.0);
+```
+
+### Setting Pivots
+Change the center point for rotation and scaling (default is center 0.5, 0.5).
+```rust
+// Set pivot to top-left
+box.set_pivot(0.0, 0.0);
 ```

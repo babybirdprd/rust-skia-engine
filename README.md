@@ -136,9 +136,14 @@ movie
 
 *   **Flexbox Layout**: Powered by [Taffy](https://github.com/DioxusLabs/taffy).
 *   **Rich Text**: Advanced typography with [cosmic-text](https://github.com/pop-os/cosmic-text) (gradients, mixed styles, shadows).
-*   **Animation**: Keyframe animation, Physics-based Springs, and SVG Path animation.
 *   **Vector Graphics**: First-class support for SVG and Lottie animations.
+*   **Animation**:
+    *   Keyframe animation with easing (Linear, EaseIn, EaseOut, BounceOut).
+    *   Physics-based Spring animations.
+    *   SVG Path animation.
+    *   Text Animator (per-glyph animation).
 *   **Compositing**: Advanced masking and blend modes (Overlay, Multiply, Screen, etc.).
+*   **Visual Effects**: Blur, Color Matrix (Sepia, Grayscale), and Custom Runtime Shaders (SkSL).
 *   **Nested Timelines**: Create reusable `Composition` nodes with their own isolated timelines.
 *   **Transitions**: Built-in scene transitions (Fade, Slide, Wipe) with ripple-edit logic.
 *   **Audio**: Multi-track audio mixing with volume automation.
@@ -147,8 +152,8 @@ movie
 
 ## 📚 Documentation
 
-*   **[Scripting Guide](SCRIPTING.md)**: A "How-To" guide for layout, animation, compositing, and effects.
-*   **[API Reference](API.md)**: Comprehensive reference for all available Rhai functions and properties.
+*   **[Scripting Guide](SCRIPTING.md)**: A "Textbook" style guide with examples for every feature.
+*   **[API Reference](API.md)**: A comprehensive "Dictionary" of all available functions and properties.
 
 ## 📂 Project Structure
 
