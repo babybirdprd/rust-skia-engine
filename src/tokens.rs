@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+/// Represents a "safe zone" or padding area to avoid UI elements on specific platforms.
 #[derive(Clone, Debug)]
 pub struct SafeZone {
     pub top: f32,
@@ -9,17 +10,25 @@ pub struct SafeZone {
     pub aspect_ratio: String,
 }
 
+/// A collection of standard design tokens (spacing, radii, safe areas) exposed to the scripting API.
 #[derive(Clone, Debug)]
 pub struct DesignSystem {
+    /// Spacing tokens (px). Keys: `xs` (8), `md` (16), `xl` (32), etc.
     pub spacing: HashMap<String, f32>,
+    /// Safe area presets for different platforms. Keys: `mobile`, `tiktok`, `desktop`, etc.
     pub safe_areas: HashMap<String, SafeZone>,
+    /// Border radius presets (px). Keys: `sm` (4), `md` (8), `full` (9999).
     pub border_radius: HashMap<String, f32>,
+    /// Border width presets (px). Keys: `thin` (1), `thick` (4).
     pub border_width: HashMap<String, f32>,
+    /// Z-index presets. Keys: `background` (0), `overlay` (50), `modal` (100).
     pub z_index: HashMap<String, i32>,
+    /// Internal layout width presets (currently unused).
     pub layout_widths: HashMap<String, f32>,
 }
 
 impl DesignSystem {
+    /// Initializes the default design system with standard values.
     pub fn new() -> Self {
         let mut spacing = HashMap::new();
         spacing.insert("none".to_string(), 0.0);

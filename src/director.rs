@@ -13,6 +13,7 @@ use cosmic_text::{FontSystem, SwashCache, fontdb::Source};
 /// A unique identifier for a node in the scene graph.
 pub type NodeId = usize;
 
+/// Shared resources context that can be passed between Directors (e.g. for sub-compositions).
 #[derive(Clone)]
 pub struct DirectorContext {
     pub asset_loader: Arc<dyn AssetLoader>,
@@ -22,12 +23,14 @@ pub struct DirectorContext {
     pub typeface_cache: Arc<Mutex<HashMap<cosmic_text::fontdb::ID, skia_safe::Typeface>>>,
 }
 
+/// State for a node currently animating along an SVG path.
 #[derive(Clone)]
 pub struct PathAnimationState {
     pub path: Path,
     pub progress: Animated<f32>,
 }
 
+/// Represents the affine transformation state of a node.
 #[derive(Clone, Debug)]
 pub struct Transform {
     pub scale_x: Animated<f32>,
@@ -57,7 +60,10 @@ impl Transform {
     }
 }
 
-/// A wrapper around an `Element` that adds scene graph relationships.
+/// A wrapper around an `Element` that adds scene graph relationships and state.
+///
+/// `SceneNode` encapsulates the specific logic for hierarchy, layout positioning,
+/// masking, and temporal state (local time).
 #[derive(Clone)]
 pub struct SceneNode {
     /// The actual visual element (Box, Text, etc.)
@@ -85,6 +91,7 @@ pub struct SceneNode {
 }
 
 impl SceneNode {
+    /// Creates a new SceneNode wrapping the given Element.
     pub fn new(element: Box<dyn Element>) -> Self {
         Self {
             element,
@@ -105,13 +112,19 @@ impl SceneNode {
 /// Represents a scene (or clip) on the timeline.
 #[derive(Clone, Debug)]
 pub struct TimelineItem {
+    /// The root node of this scene.
     pub scene_root: NodeId,
+    /// The global start time in seconds.
     pub start_time: f64,
+    /// The duration of the scene in seconds.
     pub duration: f64,
+    /// Z-index for rendering order.
     pub z_index: i32,
+    /// Associated audio tracks.
     pub audio_tracks: Vec<usize>,
 }
 
+/// The type of visual transition between scenes.
 #[derive(Clone, Debug)]
 pub enum TransitionType {
     Fade,
@@ -122,6 +135,7 @@ pub enum TransitionType {
     CircleOpen,
 }
 
+/// A definition of a transition between two scenes.
 #[derive(Clone)]
 pub struct Transition {
     pub from_scene_idx: usize,
@@ -132,7 +146,10 @@ pub struct Transition {
     pub easing: EasingType,
 }
 
-/// The central engine state.
+/// The central engine coordinator.
+///
+/// `Director` manages the Scene Graph (nodes), Timeline (sequencing),
+/// and shared resources (Assets, Fonts, Audio).
 #[derive(Clone)]
 pub struct Director {
     /// The Arena of all nodes. Using `Option` allows for future removal/recycling.
@@ -141,7 +158,7 @@ pub struct Director {
     pub free_indices: Vec<usize>,
     /// The timeline of scenes.
     pub timeline: Vec<TimelineItem>,
-    /// Transitions
+    /// Active transitions.
     pub transitions: Vec<Transition>,
     /// Output width in pixels.
     pub width: i32,
@@ -153,24 +170,32 @@ pub struct Director {
     pub samples_per_frame: u32,
     /// Shutter angle in degrees (0.0 to 360.0). Default: 180.0.
     pub shutter_angle: f32,
-    /// Render Mode (Preview or Export)
+    /// Render Mode (Preview or Export).
     pub render_mode: RenderMode,
     /// Asset loader for resolving file paths to bytes.
     pub asset_loader: Arc<dyn AssetLoader>,
-    /// Audio Mixer state
+    /// Audio Mixer state.
     pub audio_mixer: AudioMixer,
-    /// Global shader cache
+    /// Global shader cache.
     pub shader_cache: Arc<Mutex<HashMap<String, RuntimeEffect>>>,
-    /// Shared Font System (initialized once)
+    /// Shared Font System (initialized once).
     pub font_system: Arc<Mutex<FontSystem>>,
-    /// Shared Swash Cache (initialized once)
+    /// Shared Swash Cache (initialized once).
     pub swash_cache: Arc<Mutex<SwashCache>>,
-    /// Shared Typeface Cache (initialized once)
+    /// Shared Typeface Cache (initialized once).
     pub typeface_cache: Arc<Mutex<HashMap<cosmic_text::fontdb::ID, skia_safe::Typeface>>>,
 }
 
 impl Director {
     /// Creates a new Director instance.
+    ///
+    /// # Arguments
+    /// * `width` - Output width in pixels.
+    /// * `height` - Output height in pixels.
+    /// * `fps` - Frame rate.
+    /// * `asset_loader` - Implementation of asset loading strategy.
+    /// * `render_mode` - Mode hint (e.g. Preview vs Export).
+    /// * `context` - Optional existing context (for nested compositions).
     pub fn new(width: i32, height: i32, fps: u32, asset_loader: Arc<dyn AssetLoader>, render_mode: RenderMode, context: Option<DirectorContext>) -> Self {
 
         let (font_system, swash_cache, shader_cache, typeface_cache, loader_to_use) = if let Some(ctx) = context {
@@ -179,7 +204,7 @@ impl Director {
             let mut font_system = FontSystem::new();
             // Load fallback font if available
             if let Some(bytes) = asset_loader.load_font_fallback() {
-                 let mut db = font_system.db_mut();
+                 let db = font_system.db_mut();
                  db.load_font_source(Source::Binary(Arc::new(bytes)));
             }
             (
@@ -211,6 +236,9 @@ impl Director {
         }
     }
 
+    /// Mixes audio for the current frame time by traversing the scene graph.
+    ///
+    /// This aggregates audio from both global tracks and active scene nodes (including nested compositions).
     pub fn mix_audio(&mut self, samples_needed: usize, time: f64) -> Vec<f32> {
         let mut output = self.audio_mixer.mix(samples_needed, time);
 
@@ -258,6 +286,7 @@ impl Director {
         output
     }
 
+    /// Adds a global audio track that plays independently of scenes.
     pub fn add_global_audio(&mut self, samples: Vec<f32>) -> usize {
         let track = AudioTrack {
             samples,
@@ -269,6 +298,7 @@ impl Director {
         self.audio_mixer.add_track(track)
     }
 
+    /// Adds an audio track synchronized to a specific scene's start time.
     pub fn add_scene_audio(&mut self, samples: Vec<f32>, start_time: f64, duration: f64) -> usize {
         let track = AudioTrack {
             samples,
@@ -350,7 +380,10 @@ impl Director {
         self.nodes.get(id).and_then(|n| n.as_ref())
     }
 
-    /// Updates all active scenes in the timeline.
+    /// Updates the state of all active nodes for the given global time.
+    ///
+    /// This method calculates local time for each node, updates animations (transform, path),
+    /// and calls `update()` on the underlying Elements.
     pub fn update(&mut self, global_time: f64) {
         // Pass 1: Mark active nodes and set local time
         let mut active_roots = Vec::new();
@@ -419,6 +452,10 @@ impl Director {
         }
     }
 
+    /// Triggers `post_layout` on all active nodes.
+    ///
+    /// This is called after the Layout Engine has computed the final boxes, allowing elements
+    /// to adjust their internal state (e.g., text resizing) based on the final layout.
     pub fn run_post_layout(&mut self, global_time: f64) {
         for node_opt in self.nodes.iter_mut() {
             if let Some(node) = node_opt {

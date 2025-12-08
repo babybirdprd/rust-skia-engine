@@ -376,6 +376,7 @@ fn parse_spans_from_dynamic(content: rhai::Dynamic) -> Vec<TextSpan> {
      spans
 }
 
+/// Creates a Rhai module for accessing design system tokens.
 pub fn create_theme_api(system: DesignSystem) -> Module {
     let mut module = Module::new();
     let sys = Arc::new(system);
@@ -419,6 +420,9 @@ pub fn create_theme_api(system: DesignSystem) -> Module {
     module
 }
 
+/// Registers the Director Engine API into the provided Rhai `Engine`.
+///
+/// This exposes `Movie`, `Scene`, `Node`, `AudioTrack` types and their methods.
 pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
     let theme_module = create_theme_api(DesignSystem::new());
     engine.register_static_module("theme", theme_module.into());

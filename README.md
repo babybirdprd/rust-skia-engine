@@ -46,7 +46,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-director-engine = "1.1.0"
+director-engine = "1.1.1"
 rhai = "1.19.0" # Recommended to match engine's version
 anyhow = "1.0"
 ```

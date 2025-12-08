@@ -11,10 +11,28 @@ use ndarray::Array3;
 use skia_safe::gpu::{DirectContext, SurfaceOrigin, Budgeted};
 
 #[cfg(feature = "vulkan")]
+/// Type alias for the GPU context (Vulkan backend).
 pub type GpuContext = DirectContext;
 #[cfg(not(feature = "vulkan"))]
+/// Placeholder for GPU context when Vulkan feature is disabled.
 pub type GpuContext = ();
 
+/// Renders the entire movie to a video file (MP4).
+///
+/// This is a long-running blocking operation that:
+/// 1. Initializes the video encoder (FFmpeg).
+/// 2. Iterates through every frame of the timeline.
+/// 3. Updates the Scene Graph (Update -> Layout -> PostLayout).
+/// 4. Rasterizes the scene to a Skia Surface.
+/// 5. Handles Motion Blur via accumulation buffer (if configured).
+/// 6. Sends pixels to the encoder.
+/// 7. Mixes and encodes audio.
+///
+/// # Arguments
+/// * `director` - The director instance containing the movie state.
+/// * `out_path` - Destination path for the .mp4 file.
+/// * `gpu_context` - Optional GPU context for hardware acceleration.
+/// * `audio_track_path` - Optional path to a background audio track (deprecated; use `director.add_global_audio`).
 #[allow(unused_variables)]
 pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Option<&mut GpuContext>, audio_track_path: Option<PathBuf>) -> Result<()> {
     let width = director.width;
@@ -210,6 +228,9 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
     Ok(())
 }
 
+/// Recursively renders a node and its children to the canvas.
+///
+/// Handles transformation stack, blending modes, and masking.
 pub fn render_recursive(director: &Director, node_id: crate::director::NodeId, canvas: &skia_safe::Canvas, parent_opacity: f32) {
     if let Some(node) = director.get_node(node_id) {
          canvas.save();
@@ -423,6 +444,9 @@ fn draw_transition(
     }
 }
 
+/// Renders a single frame at a specific timestamp to the provided canvas.
+///
+/// This is helpful for debugging or generating static previews without running the full export loop.
 pub fn render_frame(director: &mut Director, time: f64, canvas: &skia_safe::Canvas) {
      let mut layout_engine = LayoutEngine::new();
      director.update(time);

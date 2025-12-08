@@ -5,20 +5,29 @@ use std::thread;
 use std::collections::VecDeque;
 use anyhow::Result;
 
+/// Hint for determining how to handle resource loading (e.g. video decoding buffering).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RenderMode {
+    /// Optimized for playback; may drop frames to keep up or buffer opportunistically.
     Preview,
+    /// Must render every frame perfectly; blocking operations allowed.
     Export,
 }
 
+/// Commands sent to the async video decoder thread.
 pub enum VideoCommand {
-    GetFrame(f64), // Timestamp
+    /// Request a frame at the specified timestamp (in seconds).
+    GetFrame(f64),
 }
 
+/// Responses from the async video decoder thread.
 #[derive(Debug)]
 pub enum VideoResponse {
-    Frame(f64, Vec<u8>, u32, u32), // timestamp, data, w, h
+    /// Decoded frame: timestamp, raw RGBA bytes, width, height.
+    Frame(f64, Vec<u8>, u32, u32),
+    /// Reached end of video file.
     EndOfStream,
+    /// Critical error during decoding.
     Error(String),
 }
 
@@ -29,6 +38,7 @@ mod real {
     use video_rs::ffmpeg::{self, format, codec, software, ChannelLayout};
     use ndarray::Array3;
 
+    /// Configuration for video encoding.
     pub struct EncoderSettings {
         pub width: usize,
         pub height: usize,
@@ -36,11 +46,14 @@ mod real {
     }
 
     impl EncoderSettings {
+        /// Creates a default H.264 / AAC preset.
         pub fn preset_h264_yuv420p(w: usize, h: usize, _b: bool) -> Self {
              Self { width: w, height: h, sample_rate: 48000 }
         }
     }
 
+    /// A custom encoder wrapping `ffmpeg-next` (via `video-rs` bindings) to support
+    /// simultaneous Audio + Video encoding in a single process.
     pub struct Encoder {
         output: format::context::Output,
         video_idx: usize,
@@ -53,6 +66,7 @@ mod real {
     }
 
     impl Encoder {
+        /// Initializes the encoder and output file.
         pub fn new(dest: &Locator, settings: EncoderSettings) -> Result<Self> {
             ffmpeg::init().unwrap();
 
@@ -78,7 +92,7 @@ mod real {
                 v_encoder.set_flags(codec::flag::Flags::GLOBAL_HEADER);
             }
 
-            let mut v_encoder = v_encoder.open_as(codec_v)?;
+            let v_encoder = v_encoder.open_as(codec_v)?;
             let mut o_stream_v = output.add_stream(codec_v)?;
             o_stream_v.set_parameters(&v_encoder);
             let video_idx = o_stream_v.index();
@@ -97,7 +111,7 @@ mod real {
                 a_encoder.set_flags(codec::flag::Flags::GLOBAL_HEADER);
             }
 
-            let mut a_encoder = a_encoder.open_as(codec_a)?;
+            let a_encoder = a_encoder.open_as(codec_a)?;
             let mut o_stream_a = output.add_stream(codec_a)?;
             o_stream_a.set_parameters(&a_encoder);
             let audio_idx = o_stream_a.index();
@@ -147,6 +161,9 @@ mod real {
              Ok(())
         }
 
+        /// Encodes a video frame.
+        ///
+        /// `frame_array` must be RGBA (height, width, 4).
         pub fn encode(&mut self, frame_array: &Array3<u8>, time: Time) -> Result<()> {
             let (h, w, c) = frame_array.dim();
             assert_eq!(c, 4);
@@ -179,6 +196,9 @@ mod real {
             Ok(())
         }
 
+        /// Encodes audio samples.
+        ///
+        /// `samples` must be interleaved stereo floats.
         pub fn encode_audio(&mut self, samples: &[f32], _time: Time) -> Result<()> {
             self.audio_buffer.extend_from_slice(samples);
 
@@ -210,6 +230,7 @@ mod real {
             Ok(())
         }
 
+        /// Finalizes the stream, flushing buffers and writing trailers.
         pub fn finish(mut self) -> Result<()> {
              self.video_encoder.send_eof()?;
              self.write_video_packets()?;
@@ -247,6 +268,10 @@ mod real {
         }
     }
 
+    /// Asynchronous video decoder running on a separate thread.
+    ///
+    /// Useful for pre-fetching frames during preview to avoid stuttering, or for decoupling decoding
+    /// speed from rendering speed.
     #[derive(Debug)]
     pub struct AsyncDecoder {
         cmd_tx: Sender<VideoCommand>,

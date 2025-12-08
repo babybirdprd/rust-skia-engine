@@ -10,8 +10,11 @@ use lottie_skia::{SkiaRenderer, LottieContext};
 use crate::animation::{Animated, EasingType};
 use crate::AssetLoader;
 
+/// Manages external assets (images, fonts) required by a Lottie animation.
 pub struct LottieAssetManager {
+    /// Map of asset IDs (from JSON) to pre-loaded Skia Images.
     pub images: HashMap<String, Image>,
+    /// Shared loader for resolving font files.
     pub asset_loader: Arc<dyn AssetLoader>,
 }
 
@@ -46,13 +49,17 @@ impl LottieContext for LottieAssetManager {
     }
 }
 
+/// A node that renders Lottie animations (JSON-based vector animations).
 pub struct LottieNode {
     asset: Arc<LottieAsset>,
     player: Mutex<LottiePlayer>,
     pub style: Style,
     pub opacity: Animated<f32>,
+    /// Current frame number (can be animated).
     pub frame: Animated<f32>,
+    /// Playback speed multiplier (default 1.0).
     pub speed: f32,
+    /// Whether to loop the animation automatically.
     pub loop_anim: bool,
     pub asset_manager: Arc<LottieAssetManager>,
     // Cache: (frame, width, height, image)
@@ -94,6 +101,7 @@ impl Clone for LottieNode {
 }
 
 impl LottieNode {
+    /// Creates a new LottieNode from raw JSON bytes.
     pub fn new(data: &[u8], assets: HashMap<String, Image>, asset_loader: Arc<dyn AssetLoader>) -> anyhow::Result<Self> {
         let json_str = std::str::from_utf8(data)?;
         let model: LottieJson = serde_json::from_str(json_str)?;

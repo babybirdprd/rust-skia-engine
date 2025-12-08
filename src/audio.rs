@@ -8,6 +8,7 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, WindowFunction, SincInterpolationType};
 
+/// Represents a single audio source on the timeline.
 #[derive(Clone, Debug)]
 pub struct AudioTrack {
     /// Interleaved stereo samples (L, R, L, R...). Normalized -1.0 to 1.0.
@@ -22,13 +23,17 @@ pub struct AudioTrack {
     pub loop_audio: bool,
 }
 
+/// Manages mixing of multiple audio tracks.
 #[derive(Clone, Debug)]
 pub struct AudioMixer {
+    /// List of active tracks. Option allows for empty slots (freelist style).
     pub tracks: Vec<Option<AudioTrack>>,
+    /// Output sample rate (usually 48000Hz).
     pub sample_rate: u32,
 }
 
 impl AudioMixer {
+    /// Creates a new mixer with the specified sample rate.
     pub fn new(sample_rate: u32) -> Self {
         Self {
             tracks: Vec::new(),
@@ -36,6 +41,7 @@ impl AudioMixer {
         }
     }
 
+    /// Adds a track to the mixer.
     pub fn add_track(&mut self, track: AudioTrack) -> usize {
         // Find empty slot
         if let Some(idx) = self.tracks.iter().position(|t| t.is_none()) {
@@ -48,12 +54,19 @@ impl AudioMixer {
         }
     }
 
+    /// Returns a mutable reference to a track.
     pub fn get_track_mut(&mut self, id: usize) -> Option<&mut AudioTrack> {
         self.tracks.get_mut(id).and_then(|t| t.as_mut())
     }
 
-    /// Mixes audio for a specific time window.
-    /// Returns interleaved stereo samples.
+    /// Mixes all active tracks for a specific time window.
+    ///
+    /// # Arguments
+    /// * `samples_needed` - Number of samples to generate (per channel).
+    /// * `start_time` - Global start time for the mix window.
+    ///
+    /// # Returns
+    /// * `Vec<f32>` - Interleaved stereo samples (length = samples_needed * 2).
     pub fn mix(&mut self, samples_needed: usize, start_time: f64) -> Vec<f32> {
         // Output buffer (stereo)
         let mut output = vec![0.0; samples_needed * 2];
@@ -124,6 +137,9 @@ impl AudioMixer {
     }
 }
 
+/// Resamples audio data to the target sample rate.
+///
+/// Uses high-quality Sinc interpolation (via `rubato`).
 pub fn resample_audio(samples: &[f32], source_rate: u32, target_rate: u32) -> Result<Vec<f32>> {
     if source_rate == target_rate {
         return Ok(samples.to_vec());
@@ -204,6 +220,9 @@ pub fn resample_audio(samples: &[f32], source_rate: u32, target_rate: u32) -> Re
     Ok(result)
 }
 
+/// Decodes an audio file from raw bytes into interleaved stereo float samples.
+///
+/// Automatically handles format detection and resampling to the target rate.
 pub fn load_audio_bytes(data: &[u8], target_sample_rate: u32) -> Result<Vec<f32>> {
     let mss = MediaSourceStream::new(Box::new(Cursor::new(data.to_vec())), Default::default());
     let hint = Hint::new();

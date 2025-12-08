@@ -2,6 +2,8 @@
 name = "lottie-core"
 version.workspace = true
 edition.workspace = true
+license = "MIT"
+description = "Core logic for Lottie animations"
 
 [dependencies]
 lottie-data.workspace = true

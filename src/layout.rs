@@ -1,6 +1,10 @@
 use taffy::prelude::*;
 use crate::director::{Director, NodeId};
 
+/// Manages the layout computation using the Taffy engine.
+///
+/// `LayoutEngine` synchronizes the Director's Scene Graph with Taffy's internal tree,
+/// computes the Flexbox/Grid layout, and writes the results back to `SceneNode::layout_rect`.
 pub struct LayoutEngine {
     taffy: TaffyTree,
     // Persistent map for mapping Director NodeId -> Taffy NodeId
@@ -8,6 +12,7 @@ pub struct LayoutEngine {
 }
 
 impl LayoutEngine {
+    /// Creates a new LayoutEngine instance.
     pub fn new() -> Self {
         Self {
             taffy: TaffyTree::new(),
@@ -15,6 +20,13 @@ impl LayoutEngine {
         }
     }
 
+    /// Computes the layout for the current frame.
+    ///
+    /// # Process
+    /// 1. **Sync Phase A**: Creates new Taffy nodes for new SceneNodes and updates styles for dirty nodes.
+    /// 2. **Sync Phase B**: Updates parent-child relationships in Taffy to match the Scene Graph.
+    /// 3. **Compute**: Triggers `taffy.compute_layout` for all active scene roots.
+    /// 4. **Write Back**: Copies the computed (x, y, w, h) from Taffy back to `SceneNode`.
     pub fn compute_layout(&mut self, director: &mut Director, time: f64) {
         // 1. Sync Phase A: Ensure Nodes Exist & Update Styles
         // Iterate over all potential node IDs in the Director

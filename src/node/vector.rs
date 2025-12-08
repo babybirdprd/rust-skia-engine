@@ -6,6 +6,9 @@ use std::any::Any;
 use usvg::{Tree, Options};
 use tiny_skia::{Pixmap, Transform};
 
+/// A node that renders scalable vector graphics (SVG).
+///
+/// Rasterizes the SVG to a bitmap at the exact size required by the layout, ensuring crisp rendering.
 #[derive(Debug)]
 pub struct VectorNode {
     tree: Arc<Tree>,

@@ -24,8 +24,11 @@ use std::ops::Range;
 // Video imports
 use crate::video_wrapper::{AsyncDecoder, RenderMode, VideoResponse};
 
+/// Specifies the data source for a video node.
 pub enum VideoSource {
+    /// Load from a local file path.
     Path(PathBuf),
+    /// Load from raw bytes (in-memory).
     Bytes(Vec<u8>),
 }
 
@@ -43,6 +46,7 @@ fn parse_easing(e: &str) -> EasingType {
 
 // --- Effect Node & Types ---
 
+/// Represents an animatable uniform value for Runtime Shaders.
 #[derive(Debug, Clone)]
 pub enum ShaderUniform {
     Float(Animated<f32>),
@@ -58,14 +62,19 @@ impl ShaderUniform {
     }
 }
 
+/// Available visual effects that can be applied to nodes.
 #[derive(Debug, Clone)]
 pub enum EffectType {
+    /// Gaussian Blur with animated sigma (radius).
     Blur(Animated<f32>),
+    /// 4x5 Color Matrix transform (e.g. Grayscale, Sepia).
     ColorMatrix(Vec<f32>),
+    /// Custom SkSL shader with animated uniforms.
     RuntimeShader {
         sksl: String,
         uniforms: HashMap<String, ShaderUniform>,
     },
+    /// Drop Shadow effect.
     DropShadow {
         blur: Animated<f32>,
         offset_x: Animated<f32>,
@@ -179,6 +188,9 @@ fn build_effect_filter(
     current_filter
 }
 
+/// A node that applies visual effects (filters) to its children.
+///
+/// It does not render content itself but wraps its children in a layer with applied image filters.
 pub struct EffectNode {
     pub effects: Vec<EffectType>,
     pub style: Style,
@@ -273,6 +285,9 @@ impl Element for EffectNode {
 }
 
 // --- Box Node ---
+/// A fundamental layout and styling block (div-like).
+///
+/// Supports background color, borders, shadows, and rounded corners.
 #[derive(Debug, Clone)]
 pub struct BoxNode {
     pub style: Style,
@@ -460,6 +475,7 @@ pub struct TextAnimator {
     pub animation: Animated<f32>,
 }
 
+/// A node for rendering rich text with support for advanced layout and per-grapheme animations.
 pub struct TextNode {
     pub spans: Vec<TextSpan>,
     pub default_font_size: Animated<f32>,
@@ -898,7 +914,7 @@ impl Element for TextNode {
 
                      if typeface_opt.is_none() {
                          // Cache miss, load from font_system
-                         let mut fs = self.font_system.lock().unwrap();
+                         let fs = self.font_system.lock().unwrap();
                          if let Some(face) = fs.db().face(font_id) {
                              let data = match &face.source {
                                  Source::Binary(arc) => Some(Data::new_copy(arc.as_ref().as_ref())),
@@ -1101,6 +1117,7 @@ impl Element for TextNode {
 }
 
 // --- Image Node ---
+/// A node that renders a static raster image (PNG, JPG, etc.).
 #[derive(Debug, Clone)]
 pub struct ImageNode {
     pub image: Option<Image>,
@@ -1170,6 +1187,9 @@ impl Element for ImageNode {
 }
 
 // --- Video Node ---
+/// A node that plays a video file.
+///
+/// Handles async decoding and frame buffering.
 #[derive(Debug)]
 pub struct VideoNode {
     pub opacity: Animated<f32>,
@@ -1318,6 +1338,9 @@ impl Element for VideoNode {
 
 // --- Composition Node (RFC 010) ---
 
+/// A node that contains its own isolated timeline and Director.
+///
+/// Used for nesting compositions (e.g. pre-comps). It renders the sub-timeline to a surface.
 pub struct CompositionNode {
     pub internal_director: Mutex<Director>,
     pub start_offset: f64,
@@ -1367,7 +1390,7 @@ impl Element for CompositionNode {
     }
 
     fn render(&self, canvas: &Canvas, rect: Rect, opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) {
-        let mut d = self.internal_director.lock().unwrap();
+        let d = self.internal_director.lock().unwrap();
 
         let width = d.width;
         let height = d.height;
