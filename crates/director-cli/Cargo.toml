@@ -1,0 +1,15 @@
+[package]
+name = "director-cli"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[[bin]]
+name = "director-engine"
+path = "src/main.rs"
+
+[dependencies]
+# We map the package "director-core" to the dependency name "director-engine"
+# so that we can use "director_engine" in main.rs code.
+director-engine = { path = "../director-core", package = "director-core" }
+rhai = "1.23.6"

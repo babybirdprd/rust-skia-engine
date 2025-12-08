@@ -685,7 +685,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "director-engine"
+name = "director-cli"
+version = "0.1.0"
+dependencies = [
+ "director-core",
+ "rhai",
+]
+
+[[package]]
+name = "director-core"
 version = "1.1.1"
 dependencies = [
  "anyhow",
@@ -715,6 +723,14 @@ dependencies = [
  "usvg",
  "video-rs",
 ]
+
+[[package]]
+name = "director-pipeline"
+version = "0.1.0"
+
+[[package]]
+name = "director-schema"
+version = "0.1.0"
 
 [[package]]
 name = "displaydoc"

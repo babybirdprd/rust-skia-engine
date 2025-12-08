@@ -1,0 +1,54 @@
+[package]
+name = "director-core"
+version = "1.1.1"
+edition = "2021"
+description = "A high-performance 2D rendering engine using Skia and Taffy"
+license = "MIT"
+repository = "https://github.com/babybirdprd/rust-skia-engine"
+
+[lib]
+name = "director_engine"
+path = "src/lib.rs"
+
+[dependencies]
+skia-safe = "0.90.0"
+taffy = "0.9.2"
+keyframe = "1.1.1"
+cosmic-text = "0.15.0"
+rhai = "1.23.6"
+anyhow = "1.0.100"
+thiserror = "2.0.17"
+image = "0.25.9"
+symphonia = { version = "0.5.3", features = ["aac", "mp3", "pcm", "wav", "isomp4"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rubato = "0.14"
+
+# Lottie Dependencies
+lottie-core = { path = "../lottie-core", version = "0.1.0" }
+lottie-data = { path = "../lottie-data", version = "0.1.0" }
+lottie-skia = { path = "../lottie-skia", version = "0.1.0" }
+
+# Optional dependencies
+video-rs = { version = "0.10.5", optional = true, features = ["ndarray"] }
+ndarray = "0.16"
+rayon = "1.10"
+tempfile = "3.23.0"
+crossbeam-channel = "0.5.15"
+unicode-segmentation = "1.10"
+rand = "0.8"
+resvg = "0.44"
+usvg = "0.44"
+tiny-skia = "0.11"
+
+[dev-dependencies]
+hound = "3.5"
+
+[features]
+default = ["video-rs"]
+mock_video = []
+vulkan = ["skia-safe/vulkan"]
+
+[package.metadata.docs.rs]
+no-default-features = true
+features = ["mock_video"]
