@@ -108,8 +108,8 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
         let frame_start_time = i as f64 / fps as f64;
         let shutter_start_time = frame_start_time - (shutter_duration / 2.0);
 
-        let render_at_time = |director: &mut Director, layout_engine: &mut LayoutEngine, time: f64, canvas: &skia_safe::Canvas| {
-             director.update(time);
+        let mut render_at_time = |director: &mut Director, layout_engine: &mut LayoutEngine, time: f64, canvas: &skia_safe::Canvas| -> Result<()> {
+             director.update(time)?;
              layout_engine.compute_layout(director, time);
              director.run_post_layout(time);
 
@@ -163,10 +163,11 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
                      render_recursive(director, item.scene_root, canvas, 1.0);
                  }
              }
+             Ok(())
         };
 
         if samples == 1 {
-            render_at_time(director, &mut layout_engine, frame_start_time, surface.canvas());
+            render_at_time(director, &mut layout_engine, frame_start_time, surface.canvas())?;
         } else {
              let scratch_surface = accumulation_surface.as_mut().unwrap();
 
@@ -179,7 +180,7 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
                  let sample_time = shutter_start_time + t_offset;
 
                  // Clear handled by render_at_time
-                 render_at_time(director, &mut layout_engine, sample_time, scratch_surface.canvas());
+                 render_at_time(director, &mut layout_engine, sample_time, scratch_surface.canvas())?;
 
                  let weight = 1.0 / (s as f32 + 1.0);
                  let mut paint = skia_safe::Paint::default();
@@ -447,9 +448,9 @@ fn draw_transition(
 /// Renders a single frame at a specific timestamp to the provided canvas.
 ///
 /// This is helpful for debugging or generating static previews without running the full export loop.
-pub fn render_frame(director: &mut Director, time: f64, canvas: &skia_safe::Canvas) {
+pub fn render_frame(director: &mut Director, time: f64, canvas: &skia_safe::Canvas) -> Result<()> {
      let mut layout_engine = LayoutEngine::new();
-     director.update(time);
+     director.update(time)?;
      layout_engine.compute_layout(director, time);
      director.run_post_layout(time);
 
@@ -463,4 +464,5 @@ pub fn render_frame(director: &mut Director, time: f64, canvas: &skia_safe::Canv
      for (_, item) in items {
          render_recursive(director, item.scene_root, canvas, 1.0);
      }
+     Ok(())
 }

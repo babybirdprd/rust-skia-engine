@@ -131,7 +131,7 @@ impl Element for LottieNode {
     fn layout_style(&self) -> Style { self.style.clone() }
     fn set_layout_style(&mut self, style: Style) { self.style = style; }
 
-    fn update(&mut self, time: f64) -> bool {
+    fn update(&mut self, time: f64) -> anyhow::Result<bool> {
         self.opacity.update(time);
         self.frame.update(time);
 
@@ -164,7 +164,7 @@ impl Element for LottieNode {
              }
         }
 
-        true
+        Ok(true)
     }
 
     fn render(&self, canvas: &Canvas, rect: Rect, parent_opacity: f32, _draw_children: &mut dyn FnMut(&Canvas)) {

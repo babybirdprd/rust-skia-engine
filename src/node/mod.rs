@@ -225,12 +225,12 @@ impl Element for EffectNode {
         self.style.clone()
     }
 
-    fn update(&mut self, time: f64) -> bool {
+    fn update(&mut self, time: f64) -> anyhow::Result<bool> {
         self.current_time = time as f32;
         for effect in &mut self.effects {
             effect.update(time);
         }
-        true
+        Ok(true)
     }
 
     fn render(&self, canvas: &Canvas, rect: Rect, opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) {
@@ -332,7 +332,7 @@ impl Element for BoxNode {
         self.style.clone()
     }
 
-    fn update(&mut self, time: f64) -> bool {
+    fn update(&mut self, time: f64) -> anyhow::Result<bool> {
         let mut changed = false;
         if let Some(bg) = &mut self.bg_color {
             bg.update(time);
@@ -353,7 +353,7 @@ impl Element for BoxNode {
         self.shadow_offset_y.update(time);
         self.border_radius.update(time);
         self.border_width.update(time);
-        changed
+        Ok(changed)
     }
 
     fn render(&self, canvas: &Canvas, rect: Rect, opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) {
@@ -630,7 +630,7 @@ impl Element for TextNode {
         self.style.clone()
     }
 
-    fn update(&mut self, time: f64) -> bool {
+    fn update(&mut self, time: f64) -> anyhow::Result<bool> {
         self.default_font_size.update(time);
         self.default_color.update(time);
 
@@ -647,7 +647,7 @@ impl Element for TextNode {
             let mut fs = self.font_system.lock().unwrap();
             buffer.set_metrics(&mut fs, Metrics::new(size, line_height));
         }
-        true
+        Ok(true)
     }
 
     fn post_layout(&mut self, rect: Rect) {
@@ -1126,13 +1126,16 @@ pub struct ImageNode {
 }
 
 impl ImageNode {
-    pub fn new(data: Vec<u8>) -> Self {
+    pub fn new(data: Vec<u8>) -> anyhow::Result<Self> {
         let image = Image::from_encoded(Data::new_copy(&data));
-        Self {
+        if image.is_none() {
+            return Err(anyhow::anyhow!("Failed to decode image data"));
+        }
+        Ok(Self {
             image,
             opacity: Animated::new(1.0),
             style: Style::DEFAULT,
-        }
+        })
     }
 }
 
@@ -1148,9 +1151,9 @@ impl Element for ImageNode {
         self.style = style;
     }
 
-    fn update(&mut self, time: f64) -> bool {
+    fn update(&mut self, time: f64) -> anyhow::Result<bool> {
         self.opacity.update(time);
-        true
+        Ok(true)
     }
 
     fn render(&self, canvas: &Canvas, rect: Rect, parent_opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) {
@@ -1228,7 +1231,7 @@ impl Clone for VideoNode {
 }
 
 impl VideoNode {
-    pub fn new(source: VideoSource, mode: RenderMode) -> Self {
+    pub fn new(source: VideoSource, mode: RenderMode) -> anyhow::Result<Self> {
         let (path, temp_file) = match source {
             VideoSource::Path(p) => (p, None),
             VideoSource::Bytes(data) => {
@@ -1239,17 +1242,18 @@ impl VideoNode {
             }
         };
 
-        let decoder = AsyncDecoder::new(path.clone(), mode).ok();
+        // Propagate error
+        let decoder = AsyncDecoder::new(path.clone(), mode)?;
 
-        Self {
+        Ok(Self {
             opacity: Animated::new(1.0),
             style: Style::DEFAULT,
             current_frame: Mutex::new(None),
-            decoder,
+            decoder: Some(decoder),
             render_mode: mode,
             temp_file,
             path,
-        }
+        })
     }
 }
 
@@ -1265,7 +1269,7 @@ impl Element for VideoNode {
         self.style = style;
     }
 
-    fn update(&mut self, time: f64) -> bool {
+    fn update(&mut self, time: f64) -> anyhow::Result<bool> {
         self.opacity.update(time);
 
         if let Some(decoder) = &self.decoder {
@@ -1288,19 +1292,18 @@ impl Element for VideoNode {
                      }
                      VideoResponse::EndOfStream => {
                          if self.render_mode == RenderMode::Export {
-                             return false;
+                             return Ok(false);
                          }
                      }
                      VideoResponse::Error(e) => {
                          if self.render_mode == RenderMode::Export {
-                             eprintln!("Video Error: {}", e);
-                             return false;
+                             return Err(anyhow::anyhow!("Video Error: {}", e));
                          }
                      }
                  }
             }
         }
-        true
+        Ok(true)
     }
 
     fn render(&self, canvas: &Canvas, rect: Rect, parent_opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) {
@@ -1376,17 +1379,17 @@ impl Element for CompositionNode {
         self.style.clone()
     }
 
-    fn update(&mut self, time: f64) -> bool {
+    fn update(&mut self, time: f64) -> anyhow::Result<bool> {
         let comp_time = time - self.start_offset;
         #[allow(unused_mut)]
         let mut d = self.internal_director.lock().unwrap();
-        d.update(comp_time);
+        d.update(comp_time)?;
 
         let mut layout_engine = LayoutEngine::new();
         layout_engine.compute_layout(&mut d, comp_time);
         d.run_post_layout(comp_time);
 
-        true
+        Ok(true)
     }
 
     fn render(&self, canvas: &Canvas, rect: Rect, opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) {

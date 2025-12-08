@@ -145,8 +145,8 @@ pub trait Element: std::fmt::Debug + ElementClone {
     /// Updates the element's state for the given time.
     ///
     /// # Returns
-    /// * `true` if the element's visual appearance changed (requiring a repaint).
-    fn update(&mut self, time: f64) -> bool;
+    /// * `Ok(true)` if the element's visual appearance changed (requiring a repaint).
+    fn update(&mut self, time: f64) -> anyhow::Result<bool>;
 
     /// Called after layout is computed but before rendering.
     ///

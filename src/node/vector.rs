@@ -29,16 +29,16 @@ impl Clone for VectorNode {
 }
 
 impl VectorNode {
-    pub fn new(data: &[u8]) -> Self {
+    pub fn new(data: &[u8]) -> anyhow::Result<Self> {
         let opt = Options::default();
         // usvg 0.44: Tree::from_data
-        let tree = Tree::from_data(data, &opt).expect("Failed to parse SVG");
-        Self {
+        let tree = Tree::from_data(data, &opt).map_err(|e| anyhow::anyhow!("Failed to parse SVG: {}", e))?;
+        Ok(Self {
             tree: Arc::new(tree),
             cache: Mutex::new(None),
             style: Style::DEFAULT,
             opacity: crate::animation::Animated::new(1.0),
-        }
+        })
     }
 }
 
@@ -54,9 +54,9 @@ impl Element for VectorNode {
         self.style = style;
     }
 
-    fn update(&mut self, time: f64) -> bool {
+    fn update(&mut self, time: f64) -> anyhow::Result<bool> {
         self.opacity.update(time);
-        true
+        Ok(true)
     }
 
     fn render(&self, canvas: &Canvas, rect: Rect, parent_opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) {

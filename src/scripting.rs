@@ -1,4 +1,4 @@
-use rhai::{Engine, Map, Module};
+use rhai::{Engine, Map, Module, EvalAltResult};
 use crate::director::{Director, NodeId, TimelineItem, PathAnimationState, Transition, TransitionType};
 use crate::node::{BoxNode, TextNode, ImageNode, VideoNode, CompositionNode, EffectType, EffectNode, VectorNode, LottieNode, VideoSource, ShaderUniform};
 use crate::video_wrapper::RenderMode;
@@ -8,7 +8,7 @@ use crate::tokens::DesignSystem;
 use crate::AssetLoader;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
-use skia_safe::Path;
+use skia_safe::{Path, RuntimeEffect};
 use taffy::style::{Style, FlexDirection, AlignItems, JustifyContent, Dimension, LengthPercentage, LengthPercentageAuto};
 use taffy::geometry::Rect;
 
@@ -661,43 +661,37 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         NodeHandle { director: scene.director.clone(), id }
     });
 
-    engine.register_fn("add_image", |parent: &mut NodeHandle, path: &str| {
+    engine.register_fn("add_image", |parent: &mut NodeHandle, path: &str| -> Result<NodeHandle, Box<EvalAltResult>> {
          let mut d = parent.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let bytes = d.asset_loader.load_bytes(path).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Asset not found: {}", path).into(), rhai::Position::NONE)))?;
 
-         let img_node = ImageNode::new(bytes);
+         let img_node = ImageNode::new(bytes).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(e.to_string().into(), rhai::Position::NONE)))?;
          let id = d.add_node(Box::new(img_node));
          d.add_child(parent.id, id);
-         NodeHandle { director: parent.director.clone(), id }
+         Ok(NodeHandle { director: parent.director.clone(), id })
     });
 
-    engine.register_fn("add_lottie", |parent: &mut NodeHandle, path: &str| {
+    engine.register_fn("add_lottie", |parent: &mut NodeHandle, path: &str| -> Result<NodeHandle, Box<EvalAltResult>> {
          let mut d = parent.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let bytes = d.asset_loader.load_bytes(path).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Asset not found: {}", path).into(), rhai::Position::NONE)))?;
 
-         match LottieNode::new(&bytes, HashMap::new(), d.asset_loader.clone()) {
-             Ok(lottie_node) => {
-                 let id = d.add_node(Box::new(lottie_node));
-                 d.add_child(parent.id, id);
-                 NodeHandle { director: parent.director.clone(), id }
-             }
-             Err(e) => {
-                 eprintln!("Failed to load lottie: {}", e);
-                 let id = d.add_node(Box::new(BoxNode::new()));
-                 NodeHandle { director: parent.director.clone(), id }
-             }
-         }
+         let lottie_node = LottieNode::new(&bytes, HashMap::new(), d.asset_loader.clone())
+            .map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Failed to parse Lottie JSON: {}", e).into(), rhai::Position::NONE)))?;
+
+         let id = d.add_node(Box::new(lottie_node));
+         d.add_child(parent.id, id);
+         Ok(NodeHandle { director: parent.director.clone(), id })
     });
 
-    engine.register_fn("add_lottie", |parent: &mut NodeHandle, path: &str, props: rhai::Map| {
+    engine.register_fn("add_lottie", |parent: &mut NodeHandle, path: &str, props: rhai::Map| -> Result<NodeHandle, Box<EvalAltResult>> {
          let mut d = parent.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let bytes = d.asset_loader.load_bytes(path).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Asset not found: {}", path).into(), rhai::Position::NONE)))?;
 
          let mut assets_map = HashMap::new();
          if let Some(assets_prop) = props.get("assets").and_then(|v| v.clone().try_cast::<Map>()) {
              for (key, val) in assets_prop {
                  if let Ok(asset_path) = val.into_string() {
-                      let asset_bytes = d.asset_loader.load_bytes(&asset_path).unwrap_or(Vec::new());
+                      let asset_bytes = d.asset_loader.load_bytes(&asset_path).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Asset not found: {}", asset_path).into(), rhai::Position::NONE)))?;
                       let data = skia_safe::Data::new_copy(&asset_bytes);
                       if let Some(image) = skia_safe::Image::from_encoded(data) {
                           assets_map.insert(key.to_string(), image);
@@ -706,85 +700,79 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
              }
          }
 
-         match LottieNode::new(&bytes, assets_map, d.asset_loader.clone()) {
-             Ok(mut lottie_node) => {
-                 parse_layout_style(&props, &mut lottie_node.style);
-                 if let Some(v) = props.get("speed").and_then(|v| v.as_float().ok()) {
-                     lottie_node.speed = v as f32;
-                 }
-                 if let Some(v) = props.get("loop").and_then(|v| v.as_bool().ok()) {
-                     lottie_node.loop_anim = v;
-                 }
+         let mut lottie_node = LottieNode::new(&bytes, assets_map, d.asset_loader.clone())
+            .map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Failed to parse Lottie JSON: {}", e).into(), rhai::Position::NONE)))?;
 
-                 let id = d.add_node(Box::new(lottie_node));
-                 d.add_child(parent.id, id);
-                 NodeHandle { director: parent.director.clone(), id }
-             }
-             Err(e) => {
-                 eprintln!("Failed to load lottie: {}", e);
-                 let id = d.add_node(Box::new(BoxNode::new()));
-                 NodeHandle { director: parent.director.clone(), id }
-             }
+         parse_layout_style(&props, &mut lottie_node.style);
+         if let Some(v) = props.get("speed").and_then(|v| v.as_float().ok()) {
+             lottie_node.speed = v as f32;
          }
+         if let Some(v) = props.get("loop").and_then(|v| v.as_bool().ok()) {
+             lottie_node.loop_anim = v;
+         }
+
+         let id = d.add_node(Box::new(lottie_node));
+         d.add_child(parent.id, id);
+         Ok(NodeHandle { director: parent.director.clone(), id })
     });
 
-    engine.register_fn("add_svg", |scene: &mut SceneHandle, path: &str| {
+    engine.register_fn("add_svg", |scene: &mut SceneHandle, path: &str| -> Result<NodeHandle, Box<EvalAltResult>> {
          let mut d = scene.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let bytes = d.asset_loader.load_bytes(path).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Asset not found: {}", path).into(), rhai::Position::NONE)))?;
 
-         let vec_node = VectorNode::new(&bytes);
+         let vec_node = VectorNode::new(&bytes).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Failed to parse SVG: {}", e).into(), rhai::Position::NONE)))?;
          let id = d.add_node(Box::new(vec_node));
          d.add_child(scene.root_id, id);
-         NodeHandle { director: scene.director.clone(), id }
+         Ok(NodeHandle { director: scene.director.clone(), id })
     });
 
-    engine.register_fn("add_svg", |scene: &mut SceneHandle, path: &str, props: rhai::Map| {
+    engine.register_fn("add_svg", |scene: &mut SceneHandle, path: &str, props: rhai::Map| -> Result<NodeHandle, Box<EvalAltResult>> {
          let mut d = scene.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let bytes = d.asset_loader.load_bytes(path).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Asset not found: {}", path).into(), rhai::Position::NONE)))?;
 
-         let mut vec_node = VectorNode::new(&bytes);
+         let mut vec_node = VectorNode::new(&bytes).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Failed to parse SVG: {}", e).into(), rhai::Position::NONE)))?;
          parse_layout_style(&props, &mut vec_node.style);
 
          let id = d.add_node(Box::new(vec_node));
          d.add_child(scene.root_id, id);
-         NodeHandle { director: scene.director.clone(), id }
+         Ok(NodeHandle { director: scene.director.clone(), id })
     });
 
-    engine.register_fn("add_image", |parent: &mut NodeHandle, path: &str, props: rhai::Map| {
+    engine.register_fn("add_image", |parent: &mut NodeHandle, path: &str, props: rhai::Map| -> Result<NodeHandle, Box<EvalAltResult>> {
          let mut d = parent.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let bytes = d.asset_loader.load_bytes(path).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Asset not found: {}", path).into(), rhai::Position::NONE)))?;
 
-         let mut img_node = ImageNode::new(bytes);
+         let mut img_node = ImageNode::new(bytes).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(e.to_string().into(), rhai::Position::NONE)))?;
          parse_layout_style(&props, &mut img_node.style);
 
          let id = d.add_node(Box::new(img_node));
          d.add_child(parent.id, id);
-         NodeHandle { director: parent.director.clone(), id }
+         Ok(NodeHandle { director: parent.director.clone(), id })
     });
 
-    engine.register_fn("add_svg", |parent: &mut NodeHandle, path: &str| {
+    engine.register_fn("add_svg", |parent: &mut NodeHandle, path: &str| -> Result<NodeHandle, Box<EvalAltResult>> {
          let mut d = parent.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let bytes = d.asset_loader.load_bytes(path).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Asset not found: {}", path).into(), rhai::Position::NONE)))?;
 
-         let vec_node = VectorNode::new(&bytes);
+         let vec_node = VectorNode::new(&bytes).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Failed to parse SVG: {}", e).into(), rhai::Position::NONE)))?;
          let id = d.add_node(Box::new(vec_node));
          d.add_child(parent.id, id);
-         NodeHandle { director: parent.director.clone(), id }
+         Ok(NodeHandle { director: parent.director.clone(), id })
     });
 
-    engine.register_fn("add_svg", |parent: &mut NodeHandle, path: &str, props: rhai::Map| {
+    engine.register_fn("add_svg", |parent: &mut NodeHandle, path: &str, props: rhai::Map| -> Result<NodeHandle, Box<EvalAltResult>> {
          let mut d = parent.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let bytes = d.asset_loader.load_bytes(path).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Asset not found: {}", path).into(), rhai::Position::NONE)))?;
 
-         let mut vec_node = VectorNode::new(&bytes);
+         let mut vec_node = VectorNode::new(&bytes).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Failed to parse SVG: {}", e).into(), rhai::Position::NONE)))?;
          parse_layout_style(&props, &mut vec_node.style);
 
          let id = d.add_node(Box::new(vec_node));
          d.add_child(parent.id, id);
-         NodeHandle { director: parent.director.clone(), id }
+         Ok(NodeHandle { director: parent.director.clone(), id })
     });
 
-    engine.register_fn("add_video", |parent: &mut NodeHandle, path: &str| {
+    engine.register_fn("add_video", |parent: &mut NodeHandle, path: &str| -> Result<NodeHandle, Box<EvalAltResult>> {
          let mut d = parent.director.lock().unwrap();
          let mode = d.render_mode;
          let p = std::path::Path::new(path);
@@ -792,17 +780,17 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          let source = if p.exists() && p.is_file() {
              VideoSource::Path(p.to_path_buf())
          } else {
-             let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+             let bytes = d.asset_loader.load_bytes(path).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Asset not found: {}", path).into(), rhai::Position::NONE)))?;
              VideoSource::Bytes(bytes)
          };
 
-         let vid_node = VideoNode::new(source, mode);
+         let vid_node = VideoNode::new(source, mode).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(e.to_string().into(), rhai::Position::NONE)))?;
          let id = d.add_node(Box::new(vid_node));
          d.add_child(parent.id, id);
-         NodeHandle { director: parent.director.clone(), id }
+         Ok(NodeHandle { director: parent.director.clone(), id })
     });
 
-    engine.register_fn("add_video", |parent: &mut NodeHandle, path: &str, props: rhai::Map| {
+    engine.register_fn("add_video", |parent: &mut NodeHandle, path: &str, props: rhai::Map| -> Result<NodeHandle, Box<EvalAltResult>> {
          let mut d = parent.director.lock().unwrap();
          let mode = d.render_mode;
          let p = std::path::Path::new(path);
@@ -810,16 +798,16 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          let source = if p.exists() && p.is_file() {
              VideoSource::Path(p.to_path_buf())
          } else {
-             let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+             let bytes = d.asset_loader.load_bytes(path).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Asset not found: {}", path).into(), rhai::Position::NONE)))?;
              VideoSource::Bytes(bytes)
          };
 
-         let mut vid_node = VideoNode::new(source, mode);
+         let mut vid_node = VideoNode::new(source, mode).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(e.to_string().into(), rhai::Position::NONE)))?;
          parse_layout_style(&props, &mut vid_node.style);
 
          let id = d.add_node(Box::new(vid_node));
          d.add_child(parent.id, id);
-         NodeHandle { director: parent.director.clone(), id }
+         Ok(NodeHandle { director: parent.director.clone(), id })
     });
 
     engine.register_fn("add_text", |parent: &mut NodeHandle, props: rhai::Map| {
@@ -1285,21 +1273,21 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
     // Audio
     engine.register_type_with_name::<AudioTrackHandle>("AudioTrack");
 
-    engine.register_fn("add_audio", |movie: &mut MovieHandle, path: &str| {
+    engine.register_fn("add_audio", |movie: &mut MovieHandle, path: &str| -> Result<AudioTrackHandle, Box<EvalAltResult>> {
         let mut d = movie.director.lock().unwrap();
-        let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+        let bytes = d.asset_loader.load_bytes(path).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Asset not found: {}", path).into(), rhai::Position::NONE)))?;
         let samples = crate::audio::load_audio_bytes(&bytes, d.audio_mixer.sample_rate)
-            .unwrap_or_else(|e| { eprintln!("Audio error: {}", e); Vec::new() });
+            .map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Audio error: {}", e).into(), rhai::Position::NONE)))?;
 
         let id = d.add_global_audio(samples);
-        AudioTrackHandle { director: movie.director.clone(), id }
+        Ok(AudioTrackHandle { director: movie.director.clone(), id })
     });
 
-    engine.register_fn("add_audio", |scene: &mut SceneHandle, path: &str| {
+    engine.register_fn("add_audio", |scene: &mut SceneHandle, path: &str| -> Result<AudioTrackHandle, Box<EvalAltResult>> {
         let mut d = scene.director.lock().unwrap();
-        let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+        let bytes = d.asset_loader.load_bytes(path).map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Asset not found: {}", path).into(), rhai::Position::NONE)))?;
         let samples = crate::audio::load_audio_bytes(&bytes, d.audio_mixer.sample_rate)
-            .unwrap_or_else(|e| { eprintln!("Audio error: {}", e); Vec::new() });
+            .map_err(|e| Box::new(EvalAltResult::ErrorRuntime(format!("Audio error: {}", e).into(), rhai::Position::NONE)))?;
 
         let id = d.add_scene_audio(samples, scene.start_time, scene.duration);
 
@@ -1311,7 +1299,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
             item.audio_tracks.push(id);
         }
 
-        AudioTrackHandle { director: scene.director.clone(), id }
+        Ok(AudioTrackHandle { director: scene.director.clone(), id })
     });
 
     engine.register_fn("animate_volume", |track: &mut AudioTrackHandle, start: f64, end: f64, dur: f64, ease: &str| {
@@ -1329,7 +1317,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
     });
 
     // Effects
-    engine.register_fn("apply_effect", |node: &mut NodeHandle, name: &str| -> NodeHandle {
+    engine.register_fn("apply_effect", |node: &mut NodeHandle, name: &str| -> Result<NodeHandle, Box<EvalAltResult>> {
         let mut d = node.director.lock().unwrap();
         let effect = match name {
             "grayscale" => Some(EffectType::ColorMatrix(vec![
@@ -1355,13 +1343,13 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
         if let Some(eff) = effect {
             let id = apply_effect_to_node(&mut d, node.id, eff);
-            NodeHandle { director: node.director.clone(), id }
+            Ok(NodeHandle { director: node.director.clone(), id })
         } else {
-            NodeHandle { director: node.director.clone(), id: node.id }
+            Ok(NodeHandle { director: node.director.clone(), id: node.id })
         }
     });
 
-    engine.register_fn("apply_effect", |node: &mut NodeHandle, name: &str, val: f64| -> NodeHandle {
+    engine.register_fn("apply_effect", |node: &mut NodeHandle, name: &str, val: f64| -> Result<NodeHandle, Box<EvalAltResult>> {
         let mut d = node.director.lock().unwrap();
         let val = val as f32;
         let effect = match name {
@@ -1390,16 +1378,22 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
         if let Some(eff) = effect {
             let id = apply_effect_to_node(&mut d, node.id, eff);
-            NodeHandle { director: node.director.clone(), id }
+            Ok(NodeHandle { director: node.director.clone(), id })
         } else {
-             NodeHandle { director: node.director.clone(), id: node.id }
+             Ok(NodeHandle { director: node.director.clone(), id: node.id })
         }
     });
 
-    engine.register_fn("apply_effect", |node: &mut NodeHandle, name: &str, map: rhai::Map| -> NodeHandle {
+    engine.register_fn("apply_effect", |node: &mut NodeHandle, name: &str, map: rhai::Map| -> Result<NodeHandle, Box<EvalAltResult>> {
         let mut d = node.director.lock().unwrap();
         if name == "shader" {
              if let Some(code) = map.get("code").and_then(|v| v.clone().into_string().ok()) {
+
+                 // Validate Shader Compilation
+                 if let Err(e) = RuntimeEffect::make_for_shader(&code, None) {
+                     return Err(Box::new(EvalAltResult::ErrorRuntime(format!("Shader compilation failed: {}", e).into(), rhai::Position::NONE)));
+                 }
+
                  let mut uniforms = HashMap::new();
                  if let Some(u_map) = map.get("uniforms").and_then(|v| v.clone().try_cast::<Map>()) {
                      for (k, v) in u_map {
@@ -1425,9 +1419,9 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
                      uniforms
                  };
                  let id = apply_effect_to_node(&mut d, node.id, effect);
-                 return NodeHandle { director: node.director.clone(), id };
+                 return Ok(NodeHandle { director: node.director.clone(), id });
              }
         }
-        NodeHandle { director: node.director.clone(), id: node.id }
+        Ok(NodeHandle { director: node.director.clone(), id: node.id })
     });
 }

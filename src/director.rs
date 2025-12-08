@@ -384,7 +384,7 @@ impl Director {
     ///
     /// This method calculates local time for each node, updates animations (transform, path),
     /// and calls `update()` on the underlying Elements.
-    pub fn update(&mut self, global_time: f64) {
+    pub fn update(&mut self, global_time: f64) -> anyhow::Result<()> {
         // Pass 1: Mark active nodes and set local time
         let mut active_roots = Vec::new();
         for item in &self.timeline {
@@ -423,7 +423,7 @@ impl Director {
         for node_opt in self.nodes.iter_mut() {
             if let Some(node) = node_opt {
                 if (node.last_visit_time - global_time).abs() < 0.0001 {
-                    if node.element.update(node.local_time) {
+                    if node.element.update(node.local_time)? {
                         node.dirty_style = true;
                     }
 
@@ -450,6 +450,7 @@ impl Director {
                 }
             }
         }
+        Ok(())
     }
 
     /// Triggers `post_layout` on all active nodes.
