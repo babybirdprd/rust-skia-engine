@@ -60,10 +60,20 @@ Represents a segment of time in the movie.
     *   Adds a nested composition with layout properties.
 *   **`add_audio(path: string) -> AudioTrack`**
     *   Adds an audio track synced to this scene.
+*   **`add_lottie(path: string) -> Node`**
+    *   Adds a Lottie animation to the scene root.
+*   **`add_lottie(path: string, props: Map) -> Node`**
+    *   Adds a Lottie animation with properties.
+*   **`add_svg(path: string) -> Node`**
+    *   Adds an SVG vector graphic to the scene root.
+*   **`add_svg(path: string, props: Map) -> Node`**
+    *   Adds an SVG vector graphic with properties.
 
 ### `Node`
-A visual element in the scene graph (Box, Text, Image, Video, Composition).
+A visual element in the scene graph (Box, Text, Image, Video, Composition, Lottie, Vector).
 
+*   **`destroy()`**
+    *   Removes the node and its children from the scene graph.
 *   **`add_box(props: Map) -> Node`**
     *   Adds a child box.
 *   **`add_text(props: Map) -> Node`**
@@ -72,6 +82,14 @@ A visual element in the scene graph (Box, Text, Image, Video, Composition).
     *   Adds an image child.
 *   **`add_video(path: string) -> Node`**
     *   Adds a video child.
+*   **`add_lottie(path: string) -> Node`**
+    *   Adds a Lottie animation child.
+*   **`add_lottie(path: string, props: Map) -> Node`**
+    *   Adds a Lottie animation child with properties.
+*   **`add_svg(path: string) -> Node`**
+    *   Adds an SVG vector graphic child.
+*   **`add_svg(path: string, props: Map) -> Node`**
+    *   Adds an SVG vector graphic child with properties.
 *   **`set_content(content: string | Array<Map>)`**
     *   Updates text content (supports Rich Text).
 *   **`set_style(style: Map)`**
@@ -91,6 +109,11 @@ A visual element in the scene graph (Box, Text, Image, Video, Composition).
         *   Layout: `width`, `height` (if numeric), `flex_grow`, etc.
         *   Transform: `x`, `y`, `scale`, `rotation`, `skew_x`, `skew_y`.
         *   Style: `opacity`, `blur`, `size` (text).
+*   **`animate(prop: string, end: float, config: Map)`**
+    *   Animates a property using spring physics.
+    *   **Config**: `#{ stiffness: 100.0, damping: 10.0, mass: 1.0, velocity: 0.0 }`.
+*   **`animate(prop: string, start: Array<float>, end: Array<float>, duration: float, easing: string)`**
+    *   Animates a vector property (e.g., shader uniforms).
 *   **`path_animate(svg_path: string, duration: float, easing: string)`**
     *   Animates the node along an SVG path.
 *   **`add_animator(start_idx: int, end_idx: int, prop: string, start: float, end: float, duration: float, easing: string)`**
@@ -117,7 +140,7 @@ Handle to an audio resource.
 ## Properties
 
 ### Layout (Flexbox)
-Applied via `add_box` or updated via maps.
+Applied via `add_box`, `add_lottie`, `add_svg` or updated via maps.
 *   **Dimensions**: `width`, `height` (float, "auto", "50%").
 *   **Flex**: `flex_direction` (row, column, row_reverse, column_reverse), `flex_grow` (float), `flex_shrink` (float).
 *   **Alignment**: `align_items`, `justify_content` (start, end, center, stretch, space_between, space_around, space_evenly).
@@ -134,10 +157,19 @@ Applied via `add_box` or updated via maps.
 *   `content`: String or Array of Rich Text Maps.
 *   `color`: Hex string.
 *   `size`: Float (font size).
-*   `weight`: "bold" or "normal" (numeric weights supported internally but simple mapping exposed).
+*   `weight`: "bold" or "normal".
+*   `fit`: "shrink" (auto-size text to fit container).
+*   `min_size`, `max_size`: Floats (constraints for shrink mode).
+*   `text_shadow_color`: Hex string.
+*   `text_shadow_blur`, `text_shadow_x`, `text_shadow_y`: Floats.
 *   **Rich Text Span Props**:
     *   `text`: String content.
     *   `background_color`: Hex string.
     *   `background_padding`: Float.
     *   `stroke_width`, `stroke_color`.
     *   `fill_gradient`: Array of colors or Map `{ colors: [], start: [x,y], end: [x,y] }`.
+
+### Lottie Style
+*   `loop`: Boolean (default false).
+*   `speed`: Float (playback speed, default 1.0).
+*   `assets`: Map (key-value pairs for asset replacement).

@@ -53,6 +53,20 @@ container.add_text(#{
 });
 ```
 
+### Text Shadows & Shrink to Fit
+```rust
+container.add_text(#{
+    content: "Shadow Title",
+    size: 64.0,
+    fit: "shrink",          // Auto-reduce size if it doesn't fit
+    min_size: 20.0,
+    text_shadow_color: "#000000",
+    text_shadow_blur: 5.0,
+    text_shadow_x: 2.0,
+    text_shadow_y: 2.0
+});
+```
+
 ### Rich Text (Spans)
 ```rust
 container.add_text(#{
@@ -87,7 +101,47 @@ let ball = scene.add_box(#{ width: 20.0, height: 20.0, bg_color: "#FFF" });
 ball.path_animate("M 0 0 C 100 0 100 100 200 100", 3.0, "ease_in_out");
 ```
 
-## 5. Compositing
+### Spring Animation
+You can use physics-based spring animations for more natural motion.
+
+```rust
+// Animate 'y' position to 500.0 using spring physics
+// Properties: stiffness, damping, mass, velocity
+box.animate("y", 500.0, #{
+    stiffness: 200.0,
+    damping: 10.0
+});
+```
+
+## 5. Vector Graphics (SVG) & Lottie
+
+### SVG Images
+Add scalable vector graphics to your scene.
+
+```rust
+scene.add_svg("assets/logo.svg", #{
+    width: 200.0,
+    height: 200.0
+});
+```
+
+### Lottie Animations
+Add high-quality Lottie animations. You can even replace internal assets dynamically.
+
+```rust
+scene.add_lottie("assets/animation.json", #{
+    width: "100%",
+    height: "50%",
+    loop: true,
+    speed: 1.5,
+    // Replace internal images (key = asset id in JSON)
+    assets: #{
+        "img_0": "assets/new_image.png"
+    }
+});
+```
+
+## 6. Compositing
 
 ### Masks
 You can use any node to mask another. The alpha channel of the mask node determines visibility.
@@ -108,7 +162,7 @@ let overlay = scene.add_box(#{ width: "100%", height: "100%", bg_color: "#00FF00
 overlay.set_blend_mode("multiply"); // or "screen", "overlay", "soft_light", etc.
 ```
 
-## 6. Nested Timelines (Compositions)
+## 7. Nested Timelines (Compositions)
 
 You can create reusable movie clips (Compositions) and nest them inside scenes.
 
@@ -126,7 +180,7 @@ scene.add_composition(clip, #{
 });
 ```
 
-## 7. Using the Theme System
+## 8. Using the Theme System
 
 The `theme` module provides standardized tokens.
 
@@ -148,7 +202,7 @@ let content = scene.add_box(#{
 });
 ```
 
-## 8. Audio & Transitions
+## 9. Audio & Transitions
 
 ### Audio
 ```rust
@@ -172,7 +226,7 @@ let scene2 = movie.add_scene(5.0);
 movie.add_transition(scene1, scene2, "slide_left", 1.0, "ease_in_out");
 ```
 
-## 9. Motion Blur
+## 10. Motion Blur
 
 Enable cinematic motion blur for smoother animations.
 
@@ -181,7 +235,7 @@ Enable cinematic motion blur for smoother animations.
 movie.configure_motion_blur(8, 180.0);
 ```
 
-## 10. Visual Effects
+## 11. Visual Effects
 
 You can apply stacked visual effects to any node using `apply_effect`.
 
@@ -200,18 +254,24 @@ image.apply_effect("blur", 10.0); // Gaussian Blur
 You can apply custom Runtime Shaders using SkSL (Skia Shading Language). The shader must define a `main` function and can access the content via `image`.
 
 ```rust
-image.apply_effect("shader", #{
+let effect = image.apply_effect("shader", #{
     code: `
         uniform shader image;
         uniform float intensity;
+        uniform half4 color;
 
         half4 main(float2 p) {
             half4 c = image.eval(p);
-            return half4(c.r * intensity, c.g, c.b, c.a);
+            return mix(c, color, intensity);
         }
     `,
     uniforms: #{
-        intensity: 2.0
+        intensity: 0.5,
+        color: [1.0, 0.0, 0.0, 1.0] // Red (Vector uniform)
     }
 });
+
+// Animate shader uniforms
+effect.animate("intensity", 0.0, 1.0, 2.0, "linear");
+effect.animate("color", [1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0], 2.0, "linear");
 ```

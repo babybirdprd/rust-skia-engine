@@ -135,8 +135,9 @@ movie
 ## ✨ Features
 
 *   **Flexbox Layout**: Powered by [Taffy](https://github.com/DioxusLabs/taffy).
-*   **Rich Text**: Advanced typography with [cosmic-text](https://github.com/pop-os/cosmic-text) (gradients, mixed styles).
-*   **Animation**: Keyframe animation for any numeric property, plus SVG Path animation.
+*   **Rich Text**: Advanced typography with [cosmic-text](https://github.com/pop-os/cosmic-text) (gradients, mixed styles, shadows).
+*   **Animation**: Keyframe animation, Physics-based Springs, and SVG Path animation.
+*   **Vector Graphics**: First-class support for SVG and Lottie animations.
 *   **Compositing**: Advanced masking and blend modes (Overlay, Multiply, Screen, etc.).
 *   **Nested Timelines**: Create reusable `Composition` nodes with their own isolated timelines.
 *   **Transitions**: Built-in scene transitions (Fade, Slide, Wipe) with ripple-edit logic.
