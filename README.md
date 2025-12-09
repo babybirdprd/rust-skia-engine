@@ -15,30 +15,7 @@ The engine operates on a **Frame-Based, State-Driven** model:
 
 ## 🏗️ Architecture
 
-```mermaid
-graph TD
-    Script[Rhai Script] -->|Commands| API[Scripting API]
-    API -->|Mutate| Director[Director Context]
-
-    subgraph Engine Core
-        Director -->|Manage| Timeline[Timeline]
-        Director -->|Manage| AssetLoader[Asset Loader]
-        Director -->|Manage| Mixer[Audio Mixer]
-        Director -->|Update| SceneGraph[Scene Graph]
-    end
-
-    SceneGraph -->|Style| Taffy[Taffy Layout]
-    Timeline -->|Current Time| Animation[Animation System]
-    Animation -->|Interpolate| SceneGraph
-
-    subgraph Rendering Pipeline
-        SceneGraph -->|Draw| Skia[Skia Rasterizer]
-        Mixer -->|Samples| Encoder[Video/Audio Encoder]
-        Skia -->|Pixels| Encoder
-    end
-
-    Encoder -->|MP4| Output[output.mp4]
-```
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for a detailed diagram of the frame execution loop.
 
 ## 📦 Installation
 
@@ -58,6 +35,8 @@ This crate depends on `skia-safe` and `video-rs` (ffmpeg).
 *   **FFmpeg**: **Required** for video encoding.
     *   **Ubuntu**: `sudo apt install libavutil-dev libavformat-dev libavcodec-dev libswscale-dev`
     *   **MacOS**: `brew install ffmpeg`
+
+See [BUILD_GUIDE.md](docs/BUILD_GUIDE.md) for detailed setup instructions for all platforms.
 
 ## 🚀 Quick Start
 
@@ -152,8 +131,8 @@ movie
 
 ## 📚 Documentation
 
-*   **[Scripting Guide](SCRIPTING.md)**: A "Textbook" style guide with examples for every feature.
-*   **[API Reference](API.md)**: A comprehensive "Dictionary" of all available functions and properties.
+*   **[Scripting Guide](docs/SCRIPTING.md)**: A "Textbook" style guide with examples for every feature.
+*   **[API Reference](docs/API.md)**: A comprehensive "Dictionary" of all available functions and properties.
 
 ## 📂 Project Structure
 

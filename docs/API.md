@@ -49,15 +49,15 @@ Returns safe area insets for a specific platform.
 *   **Returns**: `Map` `{ top, bottom, left, right }`.
 
 ### `theme.radius(key)`
-*   **key**: `String`.
+*   **key**: `String` (e.g., "sm", "md", "lg", "full").
 *   **Returns**: `Float`.
 
 ### `theme.border(key)`
-*   **key**: `String`.
+*   **key**: `String` (e.g., "thin", "thick").
 *   **Returns**: `Float`.
 
 ### `theme.z(key)`
-*   **key**: `String` (e.g., "background", "overlay").
+*   **key**: `String` (e.g., "background", "content", "overlay").
 *   **Returns**: `Integer`.
 
 ---
@@ -105,7 +105,7 @@ Adds a text node to the scene root.
 
 ### `add_image(path)`
 Adds an image to the scene root.
-*   **path**: `String`.
+*   **path**: `String`. Path to file or asset ID.
 *   **Returns**: `NodeHandle`
 
 ### `add_image(path, props)`
@@ -130,7 +130,7 @@ Adds a Lottie with configuration.
 *   **props**: `Map`. Can include standard style props plus:
     *   `speed`: `Float` (default 1.0).
     *   `loop`: `Boolean` (default true).
-    *   `assets`: `Map` (Dynamic asset injection).
+    *   `assets`: `Map<String, String>` (Dynamic asset injection, key -> path).
 
 ### `add_svg(path)`
 Adds an SVG vector graphic to the scene root.
@@ -179,30 +179,36 @@ These methods add a child node to the current node.
 *   `set_content(content)`: Updates text content (String or Array of Maps for rich text).
 *   `set_pivot(x, y)`: Sets the transform pivot point (0.0 to 1.0). Default is (0.5, 0.5).
 *   `set_mask(mask_node)`: Uses another node to mask this node (Alpha Matte). Reparents the mask node.
-*   `set_blend_mode(mode)`: Sets the blend mode (e.g., "multiply", "screen", "overlay").
+*   `set_blend_mode(mode)`: Sets the blend mode.
+    *   **mode**: "clear", "src", "dst", "src_over", "dst_over", "src_in", "dst_in", "src_out", "dst_out", "src_atop", "dst_atop", "xor", "plus", "modulate", "screen", "overlay", "darken", "lighten", "color_dodge", "color_burn", "hard_light", "soft_light", "difference", "exclusion", "multiply", "hue", "saturation", "color", "luminosity".
 *   `set_blur(radius)`: Quickly applies a Gaussian blur.
 
 ### Animation
 *   `animate(prop, start, end, duration, easing)`
-    *   **prop**: "x", "y", "scale", "rotation", "opacity", etc.
+    *   **prop**: "x", "y", "scale", "scale_x", "scale_y", "rotation", "skew_x", "skew_y", "opacity", "blur", "shadow_blur", "shadow_x", "shadow_y", "border_radius", "border_width", "font_size".
+    *   **easing**: "linear", "ease_in", "ease_out", "ease_in_out", "bounce_out".
 *   `animate(prop, start_vec, end_vec, duration, easing)`
-    *   For vector uniforms in shaders.
+    *   Animates vector uniforms in shaders (e.g., `vec3`, `vec4`).
+    *   **start_vec/end_vec**: Array of Floats.
 *   `animate(prop, target, spring_config)`
     *   Physics-based animation from current value to target.
-    *   **spring_config**: `#{ stiffness: 100.0, damping: 10.0, mass: 1.0 }`
+    *   **spring_config**: `#{ stiffness: 100.0, damping: 10.0, mass: 1.0, velocity: 0.0 }`.
 *   `animate(prop, start, target, spring_config)`
     *   Physics-based animation with explicit start value.
 *   `path_animate(svg_path, duration, easing)`
     *   Moves the node along an SVG path string.
 *   `add_animator(start_idx, end_idx, prop, start, end, duration, easing)`
     *   **TextNode Only**. Animates specific characters (graphemes) in a text string.
-    *   **prop**: "y", "scale", "opacity", "rotation".
+    *   **prop**: "x", "y", "scale", "rotation", "opacity".
 
 ### Effects
-*   `apply_effect(name)`: Applies a preset effect ("grayscale", "sepia", "invert"). Returns a new `NodeHandle` pointing to the effect wrapper.
-*   `apply_effect(name, strength)`: Applies a variable effect ("contrast", "brightness", "blur").
+*   `apply_effect("grayscale")`, `apply_effect("sepia")`, `apply_effect("invert")`: Applies a preset color matrix. Returns a new `NodeHandle` pointing to the effect wrapper.
+*   `apply_effect("contrast", strength)`: `strength` 0.0 to 2.0+ (1.0 is normal).
+*   `apply_effect("brightness", strength)`: `strength` 0.0 to 1.0+.
+*   `apply_effect("blur", radius)`: Applies a Gaussian blur.
 *   `apply_effect("shader", config)`: Applies a custom Runtime Shader (SkSL).
-    *   **config**: `#{ code: "...", uniforms: #{ ... } }`
+    *   **config**: `#{ code: "...", uniforms: #{ ... } }`.
+    *   **uniforms**: Map of `String` -> `Float` or `Array<Float>`.
 
 ---
 
@@ -215,12 +221,12 @@ These methods add a child node to the current node.
 
 ### Layout Properties (Taffy/Flexbox)
 Used in `add_box`, `set_style`, etc.
-*   `width`, `height`: Number, "auto", or "50%".
+*   `width`, `height`: Number (pixels), "auto", or "50%" (string).
 *   `flex_direction`: "row", "column", "row_reverse", "column_reverse".
 *   `align_items`: "flex_start", "center", "flex_end", "stretch".
 *   `justify_content`: "flex_start", "center", "flex_end", "space_between", "space_around", "space_evenly".
 *   `flex_grow`, `flex_shrink`: Number.
-*   `padding`, `margin`: Number or "10%".
+*   `padding`, `margin`: Number or "10%" (string).
 
 ### Style Properties
 *   `bg_color`: Hex String.
@@ -232,6 +238,7 @@ Used in `add_box`, `set_style`, etc.
 *   `shadow_x`: Number.
 *   `shadow_y`: Number.
 *   `overflow`: "visible", "hidden".
+*   `opacity`: Number (0.0 - 1.0).
 
 ### Text Properties
 *   `content`: String or Array of Spans.
@@ -246,11 +253,18 @@ Used in `add_box`, `set_style`, etc.
 *   `text_shadow_y`: Number.
 
 ### Text Span Properties (Rich Text)
-Used inside the `content` array.
+Used inside the `content` array (e.g., `[{ text: "Hello", color: "#F00" }]`).
 *   `text`: String.
-*   `color`, `size`, `weight`.
+*   `color`: Hex String.
+*   `size`: Number.
+*   `weight`: "bold" or "normal".
+*   `font_family`: String.
+*   `font_style`: "italic" or "normal".
 *   `background_color`: Hex String.
 *   `background_padding`: Number.
 *   `stroke_width`: Number.
 *   `stroke_color`: Hex String.
-*   `fill_gradient`: Array of colors or Map (`#{ colors: [...], start: [x, y], end: [x, y] }`).
+*   `fill_gradient`: Array of colors OR Map:
+    *   `colors`: Array of Hex Strings.
+    *   `start`: Array `[x, y]` (0.0-1.0 relative).
+    *   `end`: Array `[x, y]` (0.0-1.0 relative).
