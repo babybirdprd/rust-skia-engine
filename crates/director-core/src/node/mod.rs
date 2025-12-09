@@ -9,7 +9,7 @@ use crate::types::Color;
 use crate::element::{Element, TextSpan, TextFit, TextShadow};
 use crate::animation::{Animated, EasingType, TweenableVector};
 use crate::director::Director;
-use crate::layout::LayoutEngine;
+use crate::systems::layout::LayoutEngine;
 use crate::render::render_recursive;
 use cosmic_text::{Buffer, FontSystem, Metrics, SwashCache, Attrs, AttrsList, Shaping, Weight, Style as CosmicStyle, Family, fontdb::Source};
 use std::sync::{Arc, Mutex};
@@ -1392,7 +1392,9 @@ impl Element for CompositionNode {
         d.update(comp_time);
 
         let mut layout_engine = LayoutEngine::new();
-        layout_engine.compute_layout(&mut d, comp_time);
+        let w = d.width;
+        let h = d.height;
+        layout_engine.compute_layout(&mut d.scene, w, h, comp_time);
         d.run_post_layout(comp_time);
 
         true

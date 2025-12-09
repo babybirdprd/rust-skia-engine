@@ -1,5 +1,5 @@
 use taffy::prelude::*;
-use crate::director::Director;
+use crate::scene::SceneGraph;
 use crate::types::NodeId;
 
 /// Manages the layout computation using the Taffy engine.
@@ -28,10 +28,10 @@ impl LayoutEngine {
     /// 2. **Sync Phase B**: Updates parent-child relationships in Taffy to match the Scene Graph.
     /// 3. **Compute**: Triggers `taffy.compute_layout` for all active scene roots.
     /// 4. **Write Back**: Copies the computed (x, y, w, h) from Taffy back to `SceneNode`.
-    pub fn compute_layout(&mut self, director: &mut Director, time: f64) {
+    pub fn compute_layout(&mut self, scene: &mut SceneGraph, width: i32, height: i32, time: f64) {
         // 1. Sync Phase A: Ensure Nodes Exist & Update Styles
-        // Iterate over all potential node IDs in the Director
-        for (id, node_opt) in director.scene.nodes.iter_mut().enumerate() {
+        // Iterate over all potential node IDs in the Scene
+        for (id, node_opt) in scene.nodes.iter_mut().enumerate() {
             if let Some(node) = node_opt {
                 // Ensure existence in Taffy
                 let t_id = if let Some(&existing_t_id) = self.node_map.get(&id) {
@@ -50,7 +50,7 @@ impl LayoutEngine {
                     node.dirty_style = false;
                 }
             } else {
-                // Node is deleted in Director
+                // Node is deleted in Scene
                 if let Some(t_id) = self.node_map.remove(&id) {
                     self.taffy.remove(t_id).ok();
                 }
@@ -59,7 +59,7 @@ impl LayoutEngine {
 
         // 2. Sync Phase B: Update Relationships (Children)
         // We iterate again. Since we updated all nodes in Phase A, all valid children should be in node_map.
-        for (id, node_opt) in director.scene.nodes.iter().enumerate() {
+        for (id, node_opt) in scene.nodes.iter().enumerate() {
              if let Some(node) = node_opt {
                  if let Some(&t_id) = self.node_map.get(&id) {
                      let mut children_t_ids = Vec::with_capacity(node.children.len() + 1);
@@ -83,40 +83,46 @@ impl LayoutEngine {
         }
 
         // 3. Compute Layout for Active Roots
-        // Iterate timeline to find active roots
+        // Iterate scene nodes to find active roots (parent is None + recently visited)
         let mut active_roots = Vec::new();
-        for item in &director.timeline {
-             if time >= item.start_time && time < item.start_time + item.duration {
-                 active_roots.push(item.scene_root);
-             }
+        for (id, node_opt) in scene.nodes.iter().enumerate() {
+            if let Some(node) = node_opt {
+                // Is a root?
+                if node.parent.is_none() {
+                    // Is active? (Visited in this frame)
+                    if (node.last_visit_time - time).abs() < 0.001 {
+                        active_roots.push(id);
+                    }
+                }
+            }
         }
 
         for root_id in active_roots {
             // Need to handle missing node safely
-            if director.scene.get_node(root_id).is_some() {
+            if scene.get_node(root_id).is_some() {
                  if let Some(&root_t_id) = self.node_map.get(&root_id) {
                     self.taffy.compute_layout(
                         root_t_id,
                         Size {
-                            width: AvailableSpace::Definite(director.width as f32),
-                            height: AvailableSpace::Definite(director.height as f32),
+                            width: AvailableSpace::Definite(width as f32),
+                            height: AvailableSpace::Definite(height as f32),
                         },
                     ).unwrap();
 
-                    // 4. Write back results to Director Nodes
-                    self.write_back_recursive(director, root_id);
+                    // 4. Write back results to Scene Nodes
+                    self.write_back_recursive(scene, root_id);
                  }
             }
         }
     }
 
-    fn write_back_recursive(&self, director: &mut Director, node_id: NodeId) {
+    fn write_back_recursive(&self, scene: &mut SceneGraph, node_id: NodeId) {
         if let Some(t_id) = self.node_map.get(&node_id) {
             let layout = self.taffy.layout(*t_id).unwrap();
 
             // Scope for mutable borrow
             let (children, mask_node) = {
-                let node = director.scene.get_node_mut(node_id).unwrap();
+                let node = scene.get_node_mut(node_id).unwrap();
 
                 node.layout_rect = skia_safe::Rect::from_xywh(
                     layout.location.x,
@@ -129,10 +135,10 @@ impl LayoutEngine {
 
             // Recurse
              for child_id in children {
-                 self.write_back_recursive(director, child_id);
+                 self.write_back_recursive(scene, child_id);
              }
              if let Some(mask_id) = mask_node {
-                 self.write_back_recursive(director, mask_id);
+                 self.write_back_recursive(scene, mask_id);
              }
         }
     }

@@ -53,9 +53,6 @@ pub mod animation;
 /// Rendering pipeline using Skia.
 pub mod render;
 
-/// Layout engine integration with Taffy.
-pub mod layout;
-
 /// Rhai scripting API bindings.
 pub mod scripting;
 

@@ -7,6 +7,7 @@ use crate::audio::{AudioMixer, AudioTrack};
 use crate::video_wrapper::RenderMode;
 use crate::types::{NodeId, PathAnimationState, Transform};
 use crate::systems::assets::AssetManager;
+use crate::systems::layout::LayoutEngine;
 use crate::scene::{SceneGraph, SceneNode};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
