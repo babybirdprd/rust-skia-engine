@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::path::PathBuf;
 use crate::director::{Director, TimelineItem, TransitionType};
+use crate::types::NodeId;
 use crate::layout::LayoutEngine;
 use crate::audio::load_audio_bytes;
 use skia_safe::{ColorType, AlphaType, ColorSpace, RuntimeEffect, Data, runtime_effect::ChildPtr};
@@ -232,7 +233,7 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
 /// Recursively renders a node and its children to the canvas.
 ///
 /// Handles transformation stack, blending modes, and masking.
-pub fn render_recursive(director: &Director, node_id: crate::director::NodeId, canvas: &skia_safe::Canvas, parent_opacity: f32) {
+pub fn render_recursive(director: &Director, node_id: NodeId, canvas: &skia_safe::Canvas, parent_opacity: f32) {
     if let Some(node) = director.get_node(node_id) {
          canvas.save();
 

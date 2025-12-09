@@ -5,13 +5,11 @@ use crate::animation::{Animated, EasingType};
 use crate::AssetLoader;
 use crate::audio::{AudioMixer, AudioTrack};
 use crate::video_wrapper::RenderMode;
+use crate::types::{NodeId, PathAnimationState, Transform};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use skia_safe::RuntimeEffect;
 use cosmic_text::{FontSystem, SwashCache, fontdb::Source};
-
-/// A unique identifier for a node in the scene graph.
-pub type NodeId = usize;
 
 /// Shared resources context that can be passed between Directors (e.g. for sub-compositions).
 #[derive(Clone)]
@@ -21,43 +19,6 @@ pub struct DirectorContext {
     pub swash_cache: Arc<Mutex<SwashCache>>,
     pub shader_cache: Arc<Mutex<HashMap<String, RuntimeEffect>>>,
     pub typeface_cache: Arc<Mutex<HashMap<cosmic_text::fontdb::ID, skia_safe::Typeface>>>,
-}
-
-/// State for a node currently animating along an SVG path.
-#[derive(Clone)]
-pub struct PathAnimationState {
-    pub path: Path,
-    pub progress: Animated<f32>,
-}
-
-/// Represents the affine transformation state of a node.
-#[derive(Clone, Debug)]
-pub struct Transform {
-    pub scale_x: Animated<f32>,
-    pub scale_y: Animated<f32>,
-    pub rotation: Animated<f32>,
-    pub skew_x: Animated<f32>,
-    pub skew_y: Animated<f32>,
-    pub translate_x: Animated<f32>,
-    pub translate_y: Animated<f32>,
-    pub pivot_x: f32,
-    pub pivot_y: f32,
-}
-
-impl Transform {
-    pub fn new() -> Self {
-        Self {
-            scale_x: Animated::new(1.0),
-            scale_y: Animated::new(1.0),
-            rotation: Animated::new(0.0),
-            skew_x: Animated::new(0.0),
-            skew_y: Animated::new(0.0),
-            translate_x: Animated::new(0.0),
-            translate_y: Animated::new(0.0),
-            pivot_x: 0.5,
-            pivot_y: 0.5,
-        }
-    }
 }
 
 /// A wrapper around an `Element` that adds scene graph relationships and state.
