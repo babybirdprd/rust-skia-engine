@@ -1,8 +1,10 @@
 use keyframe::{Keyframe, EasingFunction, AnimationSequence, CanTween};
 use std::fmt;
+use serde::{Serialize, Deserialize};
 
 /// Supported easing functions for animations.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EasingType {
     Linear,
     EaseIn,
@@ -33,7 +35,7 @@ impl EasingType {
 }
 
 /// Configuration for physics-based spring animations.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct SpringConfig {
     /// Tension of the spring (controls speed).
     pub stiffness: f32,
