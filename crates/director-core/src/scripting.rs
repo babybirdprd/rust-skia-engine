@@ -99,7 +99,7 @@ fn apply_effect_to_node(d: &mut Director, node_id: NodeId, effect: EffectType) -
     let effect_node = EffectNode {
         effects: vec![effect],
         style: wrapper_style,
-        shader_cache: d.shader_cache.clone(),
+        shader_cache: d.assets.shader_cache.clone(),
         current_time: 0.0,
     };
 
@@ -664,7 +664,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
     engine.register_fn("add_image", |parent: &mut NodeHandle, path: &str| {
          let mut d = parent.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
 
          let img_node = ImageNode::new(bytes);
          let id = d.add_node(Box::new(img_node));
@@ -674,9 +674,9 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
     engine.register_fn("add_lottie", |parent: &mut NodeHandle, path: &str| {
          let mut d = parent.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
 
-         match LottieNode::new(&bytes, HashMap::new(), d.asset_loader.clone()) {
+         match LottieNode::new(&bytes, HashMap::new(), &d.assets) {
              Ok(lottie_node) => {
                  let id = d.add_node(Box::new(lottie_node));
                  d.add_child(parent.id, id);
@@ -692,13 +692,13 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
     engine.register_fn("add_lottie", |parent: &mut NodeHandle, path: &str, props: rhai::Map| {
          let mut d = parent.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
 
          let mut assets_map = HashMap::new();
          if let Some(assets_prop) = props.get("assets").and_then(|v| v.clone().try_cast::<Map>()) {
              for (key, val) in assets_prop {
                  if let Ok(asset_path) = val.into_string() {
-                      let asset_bytes = d.asset_loader.load_bytes(&asset_path).unwrap_or(Vec::new());
+                      let asset_bytes = d.assets.loader.load_bytes(&asset_path).unwrap_or(Vec::new());
                       let data = skia_safe::Data::new_copy(&asset_bytes);
                       if let Some(image) = skia_safe::Image::from_encoded(data) {
                           assets_map.insert(key.to_string(), image);
@@ -707,7 +707,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
              }
          }
 
-         match LottieNode::new(&bytes, assets_map, d.asset_loader.clone()) {
+         match LottieNode::new(&bytes, assets_map, &d.assets) {
              Ok(mut lottie_node) => {
                  parse_layout_style(&props, &mut lottie_node.style);
                  if let Some(v) = props.get("speed").and_then(|v| v.as_float().ok()) {
@@ -731,7 +731,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
     engine.register_fn("add_svg", |scene: &mut SceneHandle, path: &str| {
          let mut d = scene.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
 
          let vec_node = VectorNode::new(&bytes);
          let id = d.add_node(Box::new(vec_node));
@@ -741,7 +741,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
     engine.register_fn("add_svg", |scene: &mut SceneHandle, path: &str, props: rhai::Map| {
          let mut d = scene.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
 
          let mut vec_node = VectorNode::new(&bytes);
          parse_layout_style(&props, &mut vec_node.style);
@@ -753,7 +753,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
     engine.register_fn("add_image", |parent: &mut NodeHandle, path: &str, props: rhai::Map| {
          let mut d = parent.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
 
          let mut img_node = ImageNode::new(bytes);
          parse_layout_style(&props, &mut img_node.style);
@@ -765,7 +765,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
     engine.register_fn("add_svg", |parent: &mut NodeHandle, path: &str| {
          let mut d = parent.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
 
          let vec_node = VectorNode::new(&bytes);
          let id = d.add_node(Box::new(vec_node));
@@ -775,7 +775,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
     engine.register_fn("add_svg", |parent: &mut NodeHandle, path: &str, props: rhai::Map| {
          let mut d = parent.director.lock().unwrap();
-         let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+         let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
 
          let mut vec_node = VectorNode::new(&bytes);
          parse_layout_style(&props, &mut vec_node.style);
@@ -793,7 +793,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          let source = if p.exists() && p.is_file() {
              VideoSource::Path(p.to_path_buf())
          } else {
-             let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+             let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
              VideoSource::Bytes(bytes)
          };
 
@@ -811,7 +811,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          let source = if p.exists() && p.is_file() {
              VideoSource::Path(p.to_path_buf())
          } else {
-             let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+             let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
              VideoSource::Bytes(bytes)
          };
 
@@ -825,9 +825,9 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
     engine.register_fn("add_text", |parent: &mut NodeHandle, props: rhai::Map| {
          let mut d = parent.director.lock().unwrap();
-         let fs = d.font_system.clone();
-         let sc = d.swash_cache.clone();
-         let tc = d.typeface_cache.clone();
+         let fs = d.assets.font_system.clone();
+         let sc = d.assets.swash_cache.clone();
+         let tc = d.assets.typeface_cache.clone();
 
          let spans = if let Some(c) = props.get("content") {
              parse_spans_from_dynamic(c.clone())
@@ -889,9 +889,9 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
     engine.register_fn("add_text", |scene: &mut SceneHandle, props: rhai::Map| {
          let mut d = scene.director.lock().unwrap();
-         let fs = d.font_system.clone();
-         let sc = d.swash_cache.clone();
-         let tc = d.typeface_cache.clone();
+         let fs = d.assets.font_system.clone();
+         let sc = d.assets.swash_cache.clone();
+         let tc = d.assets.typeface_cache.clone();
 
          let spans = if let Some(c) = props.get("content") {
              parse_spans_from_dynamic(c.clone())
@@ -965,11 +965,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          // Share resources from parent
          {
              let parent = scene.director.lock().unwrap();
-             inner_director.font_system = parent.font_system.clone();
-             inner_director.swash_cache = parent.swash_cache.clone();
-             inner_director.shader_cache = parent.shader_cache.clone();
-             inner_director.typeface_cache = parent.typeface_cache.clone();
-             inner_director.asset_loader = parent.asset_loader.clone();
+             inner_director.assets = parent.assets.clone();
          }
 
          let comp_node = CompositionNode {
@@ -1000,11 +996,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
          // Share resources from parent
          {
              let parent = scene.director.lock().unwrap();
-             inner_director.font_system = parent.font_system.clone();
-             inner_director.swash_cache = parent.swash_cache.clone();
-             inner_director.shader_cache = parent.shader_cache.clone();
-             inner_director.typeface_cache = parent.typeface_cache.clone();
-             inner_director.asset_loader = parent.asset_loader.clone();
+             inner_director.assets = parent.assets.clone();
          }
 
          let mut style = Style::default();
@@ -1288,7 +1280,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
     engine.register_fn("add_audio", |movie: &mut MovieHandle, path: &str| {
         let mut d = movie.director.lock().unwrap();
-        let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+        let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
         let samples = crate::audio::load_audio_bytes(&bytes, d.audio_mixer.sample_rate)
             .unwrap_or_else(|e| { eprintln!("Audio error: {}", e); Vec::new() });
 
@@ -1298,7 +1290,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
     engine.register_fn("add_audio", |scene: &mut SceneHandle, path: &str| {
         let mut d = scene.director.lock().unwrap();
-        let bytes = d.asset_loader.load_bytes(path).unwrap_or(Vec::new());
+        let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
         let samples = crate::audio::load_audio_bytes(&bytes, d.audio_mixer.sample_rate)
             .unwrap_or_else(|e| { eprintln!("Audio error: {}", e); Vec::new() });
 

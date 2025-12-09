@@ -68,6 +68,9 @@ pub mod tokens;
 /// Shared data structures used across the engine.
 pub mod types;
 
+/// Core systems (Asset Management, etc.).
+pub mod systems;
+
 pub use director::Director;
 pub use element::Element;
 

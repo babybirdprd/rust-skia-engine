@@ -23,9 +23,9 @@ fn test_text_fit_shrink() {
     }];
 
     // Create TextNode manually
-    let fs = director.font_system.clone();
-    let sc = director.swash_cache.clone();
-    let tc = director.typeface_cache.clone();
+    let fs = director.assets.font_system.clone();
+    let sc = director.assets.swash_cache.clone();
+    let tc = director.assets.typeface_cache.clone();
     let mut text_node = TextNode::new(spans, fs, sc, tc);
     text_node.fit_mode = TextFit::Shrink;
     text_node.min_size = 10.0;
@@ -71,21 +71,21 @@ fn test_render_video_output() {
 
     let spans = vec![TextSpan {
         text: "Typography Engine: Text-to-Fit Test".to_string(),
-        color: Some(director_core::element::Color::WHITE),
+        color: Some(director_core::types::Color::WHITE),
         font_family: None,
         font_weight: Some(700),
         font_style: None,
         font_size: Some(150.0),
-        background_color: Some(director_core::element::Color::new(0.0, 0.0, 1.0, 1.0)),
+        background_color: Some(director_core::types::Color::new(0.0, 0.0, 1.0, 1.0)),
         background_padding: Some(20.0),
         stroke_width: Some(2.0),
-        stroke_color: Some(director_core::element::Color::BLACK),
+        stroke_color: Some(director_core::types::Color::BLACK),
         fill_gradient: None,
     }];
 
-    let fs = director.font_system.clone();
-    let sc = director.swash_cache.clone();
-    let tc = director.typeface_cache.clone();
+    let fs = director.assets.font_system.clone();
+    let sc = director.assets.swash_cache.clone();
+    let tc = director.assets.typeface_cache.clone();
     let mut text_node = TextNode::new(spans, fs, sc, tc);
     text_node.fit_mode = TextFit::Shrink;
     text_node.min_size = 20.0;
@@ -106,7 +106,7 @@ fn test_render_video_output() {
 
     // Add Shadow
     text_node.shadow = Some(director_core::element::TextShadow {
-        color: director_core::element::Color::new(0.0, 0.0, 0.0, 0.5),
+        color: director_core::types::Color::new(0.0, 0.0, 0.0, 0.5),
         blur: 10.0,
         offset: (10.0, 10.0),
     });
