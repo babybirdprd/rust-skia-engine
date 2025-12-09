@@ -7,7 +7,7 @@ use crate::types::NodeId;
 /// `LayoutEngine` synchronizes the Director's Scene Graph with Taffy's internal tree,
 /// computes the Flexbox/Grid layout, and writes the results back to `SceneNode::layout_rect`.
 pub struct LayoutEngine {
-    taffy: TaffyTree,
+    taffy: TaffyTree<NodeId>, // Store Director NodeId as context
     // Persistent map for mapping Director NodeId -> Taffy NodeId
     node_map: std::collections::HashMap<NodeId, taffy::NodeId>,
 }
@@ -38,7 +38,9 @@ impl LayoutEngine {
                     existing_t_id
                 } else {
                     let style = node.element.layout_style();
-                    let new_t_id = self.taffy.new_leaf(style).unwrap();
+
+                    // All nodes now have context (Director NodeId) to support measure if needed
+                    let new_t_id = self.taffy.new_leaf_with_context(style, id).unwrap();
                     self.node_map.insert(id, new_t_id);
                     new_t_id
                 };
@@ -47,6 +49,10 @@ impl LayoutEngine {
                 if node.dirty_style {
                     let style = node.element.layout_style();
                     self.taffy.set_style(t_id, style).unwrap();
+
+                    // Taffy 0.9.2 doesn't support updating measure function per node this way.
+                    // Measure logic must be handled in compute_layout_with_measure.
+
                     node.dirty_style = false;
                 }
             } else {
@@ -101,12 +107,25 @@ impl LayoutEngine {
             // Need to handle missing node safely
             if scene.get_node(root_id).is_some() {
                  if let Some(&root_t_id) = self.node_map.get(&root_id) {
-                    self.taffy.compute_layout(
+                    // Taffy measure closure
+                    let measure_func = |known_dimensions: Size<Option<f32>>, available_space: Size<AvailableSpace>, _node_id: taffy::NodeId, context: Option<&mut NodeId>, _style: &Style| -> Size<f32> {
+                        if let Some(director_node_id) = context {
+                             if let Some(node) = scene.get_node(*director_node_id) {
+                                 if node.element.needs_measure() {
+                                     return node.element.measure(known_dimensions, available_space);
+                                 }
+                             }
+                        }
+                        Size::ZERO
+                    };
+
+                    self.taffy.compute_layout_with_measure(
                         root_t_id,
                         Size {
                             width: AvailableSpace::Definite(width as f32),
                             height: AvailableSpace::Definite(height as f32),
                         },
+                        measure_func
                     ).unwrap();
 
                     // 4. Write back results to Scene Nodes

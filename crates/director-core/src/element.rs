@@ -1,5 +1,7 @@
 use skia_safe::{Canvas, Rect, Color4f};
 use taffy::style::Style;
+use taffy::geometry::Size;
+use taffy::style::AvailableSpace;
 use std::any::Any;
 use crate::types::{Color, GradientConfig};
 
@@ -58,6 +60,16 @@ pub trait Element: std::fmt::Debug + ElementClone {
     fn as_any(&self) -> &dyn Any;
     /// Returns mutable self as `Any` for downcasting.
     fn as_any_mut(&mut self) -> &mut dyn Any;
+
+    /// Whether this element has intrinsic content size that layout needs to know about.
+    fn needs_measure(&self) -> bool {
+        false
+    }
+
+    /// Computes the size of the element given the available space.
+    fn measure(&self, _known_dimensions: Size<Option<f32>>, _available_space: Size<AvailableSpace>) -> Size<f32> {
+        Size::ZERO
+    }
 
     /// Returns the Taffy `Style` for layout computation.
     fn layout_style(&self) -> Style;

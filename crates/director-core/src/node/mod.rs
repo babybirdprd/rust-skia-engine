@@ -4,7 +4,8 @@ use skia_safe::{
     font_style::{Weight as SkWeight, Width as SkWidth, Slant as SkSlant}, Surface,
     RuntimeEffect, image_filters, color_filters, runtime_effect::RuntimeShaderBuilder, ColorMatrix
 };
-use taffy::style::Style;
+use taffy::style::{Style, AvailableSpace};
+use taffy::geometry::Size;
 use crate::types::Color;
 use crate::element::{Element, TextSpan, TextFit, TextShadow};
 use crate::animation::{Animated, EasingType, TweenableVector};
@@ -621,11 +622,115 @@ impl TextNode {
         }
         ranges
     }
+
+    /// Helper to ensure the cosmic-text buffer is initialized and populated.
+    /// Safe to call from &self contexts because it uses internal mutability (Mutex).
+    pub fn ensure_buffer_ready(&self) {
+        let mut buf_guard = self.buffer.lock().unwrap();
+        if buf_guard.is_none() {
+            // Buffer is missing (probably fresh clone), re-initialize it.
+            let mut fs = self.font_system.lock().unwrap();
+            let mut buffer = Buffer::new(&mut fs, Metrics::new(self.default_font_size.current_value, self.default_font_size.current_value * 1.2));
+
+            let mut full_text = String::new();
+            let mut attrs_list = AttrsList::new(&Attrs::new());
+
+            for span in &self.spans {
+                let start = full_text.len();
+                full_text.push_str(&span.text);
+                let end = full_text.len();
+
+                let mut attrs = Attrs::new();
+                if let Some(w) = span.font_weight {
+                    attrs = attrs.weight(Weight(w));
+                }
+                if let Some(s) = &span.font_style {
+                    if s == "italic" {
+                        attrs = attrs.style(CosmicStyle::Italic);
+                    }
+                }
+                if let Some(f) = &span.font_family {
+                    attrs = attrs.family(Family::Name(f));
+                }
+                if let Some(c) = &span.color {
+                    let cc = cosmic_text::Color::rgba(
+                        (c.r * 255.0) as u8,
+                        (c.g * 255.0) as u8,
+                        (c.b * 255.0) as u8,
+                        (c.a * 255.0) as u8,
+                    );
+                    attrs = attrs.color(cc);
+                }
+
+                attrs_list.add_span(start..end, &attrs);
+            }
+
+            let default_attrs = Attrs::new();
+            buffer.set_text(&mut fs, &full_text, &default_attrs, Shaping::Advanced, None);
+
+            if !buffer.lines.is_empty() {
+                buffer.lines[0].set_attrs_list(attrs_list);
+            }
+
+            *buf_guard = Some(buffer);
+        }
+    }
 }
 
 impl Element for TextNode {
     fn as_any(&self) -> &dyn Any { self }
     fn as_any_mut(&mut self) -> &mut dyn Any { self }
+
+    fn needs_measure(&self) -> bool {
+        true
+    }
+
+    fn measure(&self, known_dimensions: Size<Option<f32>>, available_space: Size<AvailableSpace>) -> Size<f32> {
+        self.ensure_buffer_ready();
+
+        let mut buf_guard = self.buffer.lock().unwrap();
+        if let Some(buffer) = buf_guard.as_mut() {
+            let mut fs = self.font_system.lock().unwrap();
+
+            // Apply available width constraint if present
+            let width_opt = match available_space.width {
+                AvailableSpace::Definite(w) => Some(w),
+                // MinContent should wrap as much as possible, so we constrain width to 0
+                // allowing the text shaper to determine the longest word width.
+                AvailableSpace::MinContent => Some(0.0),
+                AvailableSpace::MaxContent => None,
+            };
+
+            // If we have a known width (e.g. fixed style), use that over available space
+            let final_width = known_dimensions.width.or(width_opt);
+
+            // Set size on buffer to allow wrapping
+            buffer.set_size(&mut fs, final_width, None);
+
+            // Perform shaping
+            buffer.shape_until_scroll(&mut fs, false);
+
+            // Calculate dimensions
+            // Used layout_runs to determine actual height
+            let mut max_width: f32 = 0.0;
+            let mut height: f32 = 0.0;
+
+            for run in buffer.layout_runs() {
+                if run.line_w > max_width {
+                    max_width = run.line_w;
+                }
+                height = run.line_y + run.line_height; // Approximation of bottom
+            }
+
+            // Taffy needs size
+            Size {
+                width: max_width.ceil(),
+                height: height.ceil(),
+            }
+        } else {
+             Size::ZERO
+        }
+    }
 
     fn layout_style(&self) -> Style {
         self.style.clone()
