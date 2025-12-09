@@ -2,6 +2,7 @@ use skia_safe::{Path, Color4f};
 use crate::animation::Animated;
 use keyframe::CanTween;
 use keyframe::num_traits::Float;
+use serde::{Serialize, Deserialize};
 
 // --- From director.rs ---
 
@@ -48,7 +49,7 @@ impl Transform {
 // --- From element.rs ---
 
 /// Represents a RGBA color in float format (0.0 - 1.0).
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Color {
     pub r: f32,
     pub g: f32,
@@ -99,7 +100,7 @@ impl CanTween for Color {
 }
 
 /// Configuration for a linear gradient fill.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GradientConfig {
     /// List of colors in the gradient.
     pub colors: Vec<Color>,
