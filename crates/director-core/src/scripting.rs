@@ -1,8 +1,9 @@
 use rhai::{Engine, Map, Module};
-use crate::director::{Director, NodeId, TimelineItem, PathAnimationState, Transition, TransitionType};
+use crate::director::{Director, TimelineItem, Transition, TransitionType};
+use crate::types::{NodeId, PathAnimationState, Color, GradientConfig};
 use crate::node::{BoxNode, TextNode, ImageNode, VideoNode, CompositionNode, EffectType, EffectNode, VectorNode, LottieNode, VideoSource, ShaderUniform};
 use crate::video_wrapper::RenderMode;
-use crate::element::{Element, Color, TextSpan, GradientConfig, TextFit, TextShadow};
+use crate::element::{Element, TextSpan, TextFit, TextShadow};
 use crate::animation::{Animated, EasingType, TweenableVector};
 use crate::tokens::DesignSystem;
 use crate::AssetLoader;

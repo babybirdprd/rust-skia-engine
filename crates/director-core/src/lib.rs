@@ -65,6 +65,9 @@ pub mod audio;
 /// Design system tokens (spacing, colors, typography).
 pub mod tokens;
 
+/// Shared data structures used across the engine.
+pub mod types;
+
 pub use director::Director;
 pub use element::Element;
 

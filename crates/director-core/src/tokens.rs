@@ -1,14 +1,5 @@
 use std::collections::HashMap;
-
-/// Represents a "safe zone" or padding area to avoid UI elements on specific platforms.
-#[derive(Clone, Debug)]
-pub struct SafeZone {
-    pub top: f32,
-    pub bottom: f32,
-    pub left: f32,
-    pub right: f32,
-    pub aspect_ratio: String,
-}
+use crate::types::SafeZone;
 
 /// A collection of standard design tokens (spacing, radii, safe areas) exposed to the scripting API.
 #[derive(Clone, Debug)]

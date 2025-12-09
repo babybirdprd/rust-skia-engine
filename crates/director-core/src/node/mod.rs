@@ -5,7 +5,8 @@ use skia_safe::{
     RuntimeEffect, image_filters, color_filters, runtime_effect::RuntimeShaderBuilder, ColorMatrix
 };
 use taffy::style::Style;
-use crate::element::{Element, Color, TextSpan, TextFit, TextShadow};
+use crate::types::Color;
+use crate::element::{Element, TextSpan, TextFit, TextShadow};
 use crate::animation::{Animated, EasingType, TweenableVector};
 use crate::director::Director;
 use crate::layout::LayoutEngine;

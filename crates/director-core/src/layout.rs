@@ -1,5 +1,6 @@
 use taffy::prelude::*;
-use crate::director::{Director, NodeId};
+use crate::director::Director;
+use crate::types::NodeId;
 
 /// Manages the layout computation using the Taffy engine.
 ///
