@@ -19,11 +19,7 @@ fn test_director_instantiation_performance() {
     // First, create the context (simulate the parent)
     let parent = Director::new(500, 500, 60, loader.clone(), RenderMode::Preview, None);
     let context = DirectorContext {
-        asset_loader: parent.asset_loader.clone(),
-        font_system: parent.font_system.clone(),
-        swash_cache: parent.swash_cache.clone(),
-        shader_cache: parent.shader_cache.clone(),
-        typeface_cache: parent.typeface_cache.clone(),
+        assets: parent.assets.clone(),
     };
 
     let start_shared = Instant::now();

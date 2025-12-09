@@ -8,7 +8,7 @@ use crate::types::{Color, GradientConfig};
 /// Represents a span of text with specific styling properties.
 ///
 /// Used for Rich Text rendering where different parts of a string have different styles.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct TextSpan {
     pub text: String,
     pub color: Option<Color>,

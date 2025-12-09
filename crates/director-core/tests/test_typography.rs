@@ -38,7 +38,7 @@ fn test_text_fit_shrink() {
     };
 
     // Add to director
-    let id = director.add_node(Box::new(text_node));
+    let id = director.scene.add_node(Box::new(text_node));
 
     // Make it scene root
     let item = director_core::director::TimelineItem {
@@ -56,7 +56,7 @@ fn test_text_fit_shrink() {
     director_core::systems::renderer::render_frame(&mut director, 0.0, surface.canvas());
 
     // Check font size
-    let node = director.get_node(id).unwrap();
+    let node = director.scene.get_node(id).unwrap();
     let text_node = node.element.as_any().downcast_ref::<TextNode>().unwrap();
 
     println!("Final font size: {}", text_node.default_font_size.current_value);
@@ -111,7 +111,7 @@ fn test_render_video_output() {
         offset: (10.0, 10.0),
     });
 
-    let id = director.add_node(Box::new(text_node));
+    let id = director.scene.add_node(Box::new(text_node));
 
     let item = director_core::director::TimelineItem {
         scene_root: id,

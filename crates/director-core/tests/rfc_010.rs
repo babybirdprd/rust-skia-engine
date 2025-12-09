@@ -1,4 +1,4 @@
-use director_core::{scripting, AssetLoader, render::render_frame};
+use director_core::{scripting, AssetLoader, systems::renderer::render_frame};
 use std::sync::Arc;
 use rhai::Engine;
 

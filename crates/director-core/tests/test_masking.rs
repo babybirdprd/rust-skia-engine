@@ -66,13 +66,13 @@ mod tests {
              // But we know IDs are sequential.
              // 0: root, 1: container, 2: red_box, 3: mask.
 
-             let red_box_node = director.get_node(2).expect("Red box should exist");
+             let red_box_node = director.scene.get_node(2).expect("Red box should exist");
              assert_eq!(red_box_node.mask_node, Some(3), "Mask node should be set to ID 3");
 
-             let mask_node = director.get_node(3).expect("Mask node should exist");
+             let mask_node = director.scene.get_node(3).expect("Mask node should exist");
              assert_eq!(mask_node.parent, Some(2), "Mask parent should be red_box (2)");
 
-             let container = director.get_node(1).expect("Container should exist");
+             let container = director.scene.get_node(1).expect("Container should exist");
              assert!(!container.children.contains(&3), "Container should NOT contain mask (3) in children");
              assert!(container.children.contains(&2), "Container SHOULD contain red_box (2) in children");
 

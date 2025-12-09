@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 director-core = { path = "../director-core" }
 director-schema = { path = "../director-schema" }
+taffy = "0.9.2"
