@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 use crate::director::{Director, TimelineItem, TransitionType};
 use crate::types::NodeId;
-use crate::layout::LayoutEngine;
+use crate::systems::layout::LayoutEngine;
 use crate::audio::load_audio_bytes;
 use skia_safe::{ColorType, AlphaType, ColorSpace, RuntimeEffect, Data, runtime_effect::ChildPtr};
 use crate::video_wrapper::{Encoder, EncoderSettings, Locator, Time};
@@ -111,7 +111,7 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
 
         let render_at_time = |director: &mut Director, layout_engine: &mut LayoutEngine, time: f64, canvas: &skia_safe::Canvas| {
              director.update(time);
-             layout_engine.compute_layout(director, time);
+             layout_engine.compute_layout(&mut director.scene, director.width, director.height, time);
              director.run_post_layout(time);
 
              canvas.clear(skia_safe::Color::BLACK);
@@ -452,7 +452,7 @@ fn draw_transition(
 pub fn render_frame(director: &mut Director, time: f64, canvas: &skia_safe::Canvas) {
      let mut layout_engine = LayoutEngine::new();
      director.update(time);
-     layout_engine.compute_layout(director, time);
+     layout_engine.compute_layout(&mut director.scene, director.width, director.height, time);
      director.run_post_layout(time);
 
      canvas.clear(skia_safe::Color::BLACK);
