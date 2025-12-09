@@ -53,7 +53,7 @@ fn test_text_fit_shrink() {
     // Render frame 0 (trigger layout and post_layout)
     // We don't need a real canvas, just trigger the pipeline
     let mut surface = skia_safe::surfaces::raster_n32_premul((1920, 1080)).unwrap();
-    director_core::render::render_frame(&mut director, 0.0, surface.canvas());
+    director_core::systems::renderer::render_frame(&mut director, 0.0, surface.canvas());
 
     // Check font size
     let node = director.get_node(id).unwrap();
@@ -128,5 +128,5 @@ fn test_render_video_output() {
         std::fs::remove_file(&out_path).unwrap();
     }
 
-    director_core::render::render_export(&mut director, out_path, None, None).unwrap();
+    director_core::systems::renderer::render_export(&mut director, out_path, None, None).unwrap();
 }

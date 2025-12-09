@@ -2,6 +2,8 @@ use anyhow::Result;
 use std::path::PathBuf;
 use crate::director::{Director, TimelineItem, TransitionType};
 use crate::types::NodeId;
+use crate::scene::SceneGraph;
+use crate::systems::assets::AssetManager;
 use crate::systems::layout::LayoutEngine;
 use crate::audio::load_audio_bytes;
 use skia_safe::{ColorType, AlphaType, ColorSpace, RuntimeEffect, Data, runtime_effect::ChildPtr};
@@ -105,6 +107,8 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
 
     let samples_per_frame = (director.audio_mixer.sample_rate as f64 / fps as f64).round() as usize;
 
+    // Destructure director only where needed or create refs
+
     for i in 0..total_frames {
         let frame_start_time = i as f64 / fps as f64;
         let shutter_start_time = frame_start_time - (shutter_duration / 2.0);
@@ -113,6 +117,8 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
              director.update(time);
              layout_engine.compute_layout(&mut director.scene, director.width, director.height, time);
              director.run_post_layout(time);
+
+             let assets_ref = &director.assets;
 
              canvas.clear(skia_safe::Color::BLACK);
 
@@ -141,8 +147,8 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
                              if let (Some(mut surf_a), Some(mut surf_b)) = (skia_safe::surfaces::raster(&info, None, None), skia_safe::surfaces::raster(&info, None, None)) {
                                  // Render A & B
                                  if let (Some(item_a), Some(item_b)) = (director.timeline.get(trans.from_scene_idx), director.timeline.get(trans.to_scene_idx)) {
-                                     render_recursive(director, item_a.scene_root, surf_a.canvas(), 1.0);
-                                     render_recursive(director, item_b.scene_root, surf_b.canvas(), 1.0);
+                                     render_recursive(&director.scene, assets_ref, item_a.scene_root, surf_a.canvas(), 1.0);
+                                     render_recursive(&director.scene, assets_ref, item_b.scene_root, surf_b.canvas(), 1.0);
 
                                      let img_a = surf_a.image_snapshot();
                                      let img_b = surf_b.image_snapshot();
@@ -156,12 +162,12 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
                              drawn_transition = true;
                          }
                      } else {
-                         render_recursive(director, item.scene_root, canvas, 1.0);
+                         render_recursive(&director.scene, assets_ref, item.scene_root, canvas, 1.0);
                      }
                  }
              } else {
                  for (_, item) in items {
-                     render_recursive(director, item.scene_root, canvas, 1.0);
+                     render_recursive(&director.scene, assets_ref, item.scene_root, canvas, 1.0);
                  }
              }
              if time < 0.1 { eprintln!("[Frame] render complete"); }
@@ -233,8 +239,14 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
 /// Recursively renders a node and its children to the canvas.
 ///
 /// Handles transformation stack, blending modes, and masking.
-pub fn render_recursive(director: &Director, node_id: NodeId, canvas: &skia_safe::Canvas, parent_opacity: f32) {
-    if let Some(node) = director.scene.get_node(node_id) {
+pub fn render_recursive(
+    scene: &SceneGraph,
+    assets: &AssetManager,
+    node_id: NodeId,
+    canvas: &skia_safe::Canvas,
+    parent_opacity: f32
+) {
+    if let Some(node) = scene.get_node(node_id) {
          canvas.save();
 
          // Layout Position
@@ -279,7 +291,7 @@ pub fn render_recursive(director: &Director, node_id: NodeId, canvas: &skia_safe
 
          let mut draw_children = |canvas: &skia_safe::Canvas| {
              for child_id in &node.children {
-                 render_recursive(director, *child_id, canvas, parent_opacity);
+                 render_recursive(scene, assets, *child_id, canvas, parent_opacity);
              }
          };
 
@@ -303,7 +315,7 @@ pub fn render_recursive(director: &Director, node_id: NodeId, canvas: &skia_safe
 
                  // Create a layer for the mask, which will composite onto the content with DstIn
                  canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&mask_paint));
-                 render_recursive(director, mask_id, canvas, 1.0);
+                 render_recursive(scene, assets, mask_id, canvas, 1.0);
                  canvas.restore();
              }
 
@@ -455,6 +467,8 @@ pub fn render_frame(director: &mut Director, time: f64, canvas: &skia_safe::Canv
      layout_engine.compute_layout(&mut director.scene, director.width, director.height, time);
      director.run_post_layout(time);
 
+     let assets = &director.assets;
+
      canvas.clear(skia_safe::Color::BLACK);
 
      let mut items: Vec<(usize, TimelineItem)> = director.timeline.iter().cloned().enumerate()
@@ -463,6 +477,6 @@ pub fn render_frame(director: &mut Director, time: f64, canvas: &skia_safe::Canv
      items.sort_by_key(|(_, item)| item.z_index);
 
      for (_, item) in items {
-         render_recursive(director, item.scene_root, canvas, 1.0);
+         render_recursive(&director.scene, assets, item.scene_root, canvas, 1.0);
      }
 }

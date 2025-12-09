@@ -1,17 +1,14 @@
-use crate::element::Element;
 // use rayon::prelude::*; // Rayon disabled due to Taffy !Send
-use skia_safe::{Path, PathMeasure};
-use crate::animation::{Animated, EasingType};
+use skia_safe::PathMeasure;
+use crate::animation::EasingType;
 use crate::AssetLoader;
 use crate::audio::{AudioMixer, AudioTrack};
 use crate::video_wrapper::RenderMode;
-use crate::types::{NodeId, PathAnimationState, Transform};
+use crate::types::NodeId;
 use crate::systems::assets::AssetManager;
-use crate::systems::layout::LayoutEngine;
-use crate::scene::{SceneGraph, SceneNode};
+use crate::scene::SceneGraph;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
-use skia_safe::RuntimeEffect;
 use cosmic_text::{FontSystem, SwashCache, fontdb::Source};
 
 /// Shared resources context that can be passed between Directors (e.g. for sub-compositions).

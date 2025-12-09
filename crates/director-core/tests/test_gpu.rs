@@ -6,7 +6,7 @@
 #![cfg(feature = "vulkan")]
 
 use director_core::{scripting::{register_rhai_api, MovieHandle}, DefaultAssetLoader};
-use director_core::render::render_export;
+use director_core::systems::renderer::render_export;
 use rhai::Engine;
 use std::sync::Arc;
 use std::fs;

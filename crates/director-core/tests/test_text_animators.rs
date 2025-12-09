@@ -54,6 +54,6 @@ fn test_text_animator_rendering_safety() {
 
         // Render to a dummy canvas
         let mut surface = skia_safe::surfaces::raster_n32_premul((100, 100)).expect("surface");
-        director_core::render::render_frame(&mut *director, time, surface.canvas());
+        director_core::systems::renderer::render_frame(&mut *director, time, surface.canvas());
     }
 }

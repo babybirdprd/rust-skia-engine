@@ -23,7 +23,7 @@ fn test_kitchen_sink_layout() {
 
     // Trigger Layout (Frame 0)
     let mut surface = skia_safe::surfaces::raster_n32_premul((1920, 1080)).unwrap();
-    director_core::render::render_frame(&mut director, 0.0, surface.canvas());
+    director_core::systems::renderer::render_frame(&mut director, 0.0, surface.canvas());
 
     // Verify Layout Hierarchy
     let scene_root_id = director.timeline[0].scene_root;
@@ -62,5 +62,5 @@ fn test_kitchen_sink_layout() {
     }
 
     println!("Rendering kitchen_sink.mp4 (this may take a moment)...");
-    director_core::render::render_export(&mut director, out_path, None, None).expect("Export failed");
+    director_core::systems::renderer::render_export(&mut director, out_path, None, None).expect("Export failed");
 }

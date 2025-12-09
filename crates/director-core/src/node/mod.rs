@@ -10,7 +10,7 @@ use crate::element::{Element, TextSpan, TextFit, TextShadow};
 use crate::animation::{Animated, EasingType, TweenableVector};
 use crate::director::Director;
 use crate::systems::layout::LayoutEngine;
-use crate::render::render_recursive;
+use crate::systems::renderer::render_recursive;
 use cosmic_text::{Buffer, FontSystem, Metrics, SwashCache, Attrs, AttrsList, Shaping, Weight, Style as CosmicStyle, Family, fontdb::Source};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
@@ -1439,7 +1439,7 @@ impl Element for CompositionNode {
              items.sort_by_key(|(_, item)| item.z_index);
 
              for (_, item) in items {
-                 render_recursive(&d, item.scene_root, c, 1.0);
+                 render_recursive(&d.scene, &d.assets, item.scene_root, c, 1.0);
              }
 
              // Now draw surface to main canvas

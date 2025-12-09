@@ -50,9 +50,6 @@ pub mod director;
 /// Animation primitives, including `Animated<T>` and easing functions.
 pub mod animation;
 
-/// Rendering pipeline using Skia.
-pub mod render;
-
 /// Rhai scripting API bindings.
 pub mod scripting;
 
