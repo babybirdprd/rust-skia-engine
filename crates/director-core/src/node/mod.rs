@@ -30,7 +30,7 @@ use tempfile::NamedTempFile;
 use unicode_segmentation::UnicodeSegmentation;
 
 // Video imports
-use crate::video_wrapper::{AsyncDecoder, BlockingDecoder, RenderMode, VideoDecoder, VideoResponse};
+use crate::video_wrapper::{AsyncDecoder, RenderMode, VideoResponse};
 
 /// Specifies the data source for a video node.
 pub enum VideoSource {
@@ -1530,7 +1530,7 @@ pub struct VideoNode {
     pub object_fit: ObjectFit,
     current_frame: Mutex<Option<(f64, Image)>>,
 
-    decoder: Option<VideoDecoder>,
+    decoder: Option<AsyncDecoder>,
     render_mode: RenderMode,
 
     // Keep temp file alive
@@ -1543,14 +1543,8 @@ pub struct VideoNode {
 impl Clone for VideoNode {
     fn clone(&self) -> Self {
         let decoder = if self.decoder.is_some() {
-            match self.render_mode {
-                RenderMode::Preview => {
-                    AsyncDecoder::new(self.path.clone(), self.render_mode).ok().map(VideoDecoder::Async)
-                }
-                RenderMode::Export => {
-                    BlockingDecoder::new(self.path.clone()).ok().map(VideoDecoder::Blocking)
-                }
-            }
+            // Create new decoder pointing to same file.
+            AsyncDecoder::new(self.path.clone(), self.render_mode).ok()
         } else {
             None
         };
@@ -1580,14 +1574,7 @@ impl VideoNode {
             }
         };
 
-        let decoder = match mode {
-            RenderMode::Preview => {
-                AsyncDecoder::new(path.clone(), mode).ok().map(VideoDecoder::Async)
-            }
-            RenderMode::Export => {
-                BlockingDecoder::new(path.clone()).ok().map(VideoDecoder::Blocking)
-            }
-        };
+        let decoder = AsyncDecoder::new(path.clone(), mode).ok();
 
         Self {
             opacity: Animated::new(1.0),
@@ -1621,59 +1608,34 @@ impl Element for VideoNode {
     fn update(&mut self, time: f64) -> bool {
         self.opacity.update(time);
 
-        if let Some(decoder) = &mut self.decoder {
-            match decoder {
-                VideoDecoder::Async(async_dec) => {
-                    async_dec.send_request(time);
-                    if let Some(resp) = async_dec.get_response() {
-                        match resp {
-                            VideoResponse::Frame(t, data, w, h) => {
-                                let data = Data::new_copy(&data);
-                                let info = skia_safe::ImageInfo::new(
-                                    (w as i32, h as i32),
-                                    ColorType::RGBA8888,
-                                    AlphaType::Unpremul,
-                                    None,
-                                );
-                                if let Some(img) =
-                                    skia_safe::images::raster_from_data(&info, data, (w * 4) as usize)
-                                {
-                                    *self.current_frame.lock().unwrap() = Some((t, img));
-                                }
-                            }
-                            VideoResponse::EndOfStream => {}
-                            VideoResponse::Error(_) => {}
-                        }
-                    }
-                }
-                VideoDecoder::Blocking(blocking_dec) => {
-                    // Check if we already have this frame
-                    {
-                        let guard = self.current_frame.lock().unwrap();
-                        if let Some((t, _)) = *guard {
-                            if (t - time).abs() < 0.001 {
-                                return false;
-                            }
-                        }
-                    }
+        if let Some(decoder) = &self.decoder {
+            decoder.send_request(time);
 
-                    match blocking_dec.get_frame(time) {
-                        Ok((t, data, w, h)) => {
-                            let data = Data::new_copy(&data);
-                            let info = skia_safe::ImageInfo::new(
-                                (w as i32, h as i32),
-                                ColorType::RGBA8888,
-                                AlphaType::Unpremul,
-                                None,
-                            );
-                            if let Some(img) =
-                                skia_safe::images::raster_from_data(&info, data, (w * 4) as usize)
-                            {
-                                *self.current_frame.lock().unwrap() = Some((t, img));
-                            }
+            if let Some(resp) = decoder.get_response() {
+                match resp {
+                    VideoResponse::Frame(t, data, w, h) => {
+                        let data = Data::new_copy(&data);
+                        let info = skia_safe::ImageInfo::new(
+                            (w as i32, h as i32),
+                            ColorType::RGBA8888,
+                            AlphaType::Unpremul,
+                            None,
+                        );
+
+                        if let Some(img) =
+                            skia_safe::images::raster_from_data(&info, data, (w * 4) as usize)
+                        {
+                            *self.current_frame.lock().unwrap() = Some((t, img));
                         }
-                        Err(e) => {
-                            eprintln!("Blocking Video Error: {}", e);
+                    }
+                    VideoResponse::EndOfStream => {
+                        if self.render_mode == RenderMode::Export {
+                            return false;
+                        }
+                    }
+                    VideoResponse::Error(e) => {
+                        if self.render_mode == RenderMode::Export {
+                            eprintln!("Video Error: {}", e);
                             return false;
                         }
                     }

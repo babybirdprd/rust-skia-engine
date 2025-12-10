@@ -490,6 +490,15 @@ mod real {
                     }
 
                     if !found && mode == RenderMode::Export {
+                        // Could not find frame
+                        // Check if we already sent error/EOS
+                        // If not, send error
+                        // But we can't easily check channel state.
+                        // Let's assume if the loop broke, we failed to find it.
+                        // Ideally we should track if we sent response.
+                        // But resp_tx.send blocks in Export mode (size 0).
+                        // So if we didn't send anything, main thread is waiting.
+                        // We MUST send something.
                         let _ = resp_tx.send(VideoResponse::Error("Frame not found".to_string()));
                     }
                 }
@@ -513,97 +522,6 @@ mod real {
                 self.resp_rx.try_recv().ok()
             }
         }
-    }
-
-    /// Synchronous video decoder for deterministic exports.
-    pub struct BlockingDecoder {
-        decoder: video_rs::Decoder,
-        current_time: f64,
-        #[allow(dead_code)]
-        width: u32,
-        #[allow(dead_code)]
-        height: u32,
-    }
-
-    impl std::fmt::Debug for BlockingDecoder {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.debug_struct("BlockingDecoder")
-                .field("current_time", &self.current_time)
-                .field("width", &self.width)
-                .field("height", &self.height)
-                .finish()
-        }
-    }
-
-    impl BlockingDecoder {
-        pub fn new(path: PathBuf) -> Result<Self> {
-            let decoder = video_rs::Decoder::new(path)?;
-            let (width, height) = decoder.size();
-            Ok(Self {
-                decoder,
-                current_time: -1.0,
-                width,
-                height,
-            })
-        }
-
-        pub fn get_frame(&mut self, target_time: f64) -> Result<(f64, Vec<u8>, u32, u32)> {
-            // Force Seek for determinism
-            let ms = (target_time * 1000.0) as i64;
-            self.decoder.seek(ms)?;
-
-            // 2. Decode Loop
-            let max_steps = 100;
-            let epsilon = 0.001;
-
-            for _ in 0..max_steps {
-                match self.decoder.decode() {
-                    Ok((time, frame)) => {
-                        let t = time.as_secs_f64();
-                        self.current_time = t;
-
-                        // If we are significantly past the target, we missed it (shouldn't happen with correct seek)
-                        // But if we are "close enough" or just past it, return it.
-                        // Ideally we want the frame closest to target_time from the left?
-                        // Or just first frame >= target_time - epsilon?
-                        if t >= target_time - epsilon {
-                            // Convert to RGBA
-                            let shape = frame.shape();
-                            if shape.len() == 3 && shape[2] >= 3 {
-                                let h = shape[0] as u32;
-                                let w = shape[1] as u32;
-                                let channels = shape[2];
-                                let (bytes, _) = frame.into_raw_vec_and_offset();
-
-                                let data = if channels == 3 {
-                                    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
-                                    for chunk in bytes.chunks(3) {
-                                        rgba.extend_from_slice(chunk);
-                                        rgba.push(255);
-                                    }
-                                    rgba
-                                } else {
-                                    bytes
-                                };
-                                return Ok((t, data, w, h));
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        // End of stream?
-                        return Err(anyhow::anyhow!("EndOfStream"));
-                    }
-                }
-            }
-
-            Err(anyhow::anyhow!("Frame not found after max steps"))
-        }
-    }
-
-    #[derive(Debug)]
-    pub enum VideoDecoder {
-        Async(AsyncDecoder),
-        Blocking(BlockingDecoder),
     }
 }
 
@@ -721,23 +639,6 @@ pub mod mock {
                 self.resp_rx.try_recv().ok()
             }
         }
-    }
-
-    #[derive(Debug)]
-    pub struct BlockingDecoder;
-    impl BlockingDecoder {
-        pub fn new(_path: PathBuf) -> Result<Self> {
-            Ok(Self)
-        }
-        pub fn get_frame(&mut self, _target_time: f64) -> Result<(f64, Vec<u8>, u32, u32)> {
-             Ok((0.0, vec![255; 100], 10, 10))
-        }
-    }
-
-    #[derive(Debug)]
-    pub enum VideoDecoder {
-        Async(AsyncDecoder),
-        Blocking(BlockingDecoder),
     }
 }
 
