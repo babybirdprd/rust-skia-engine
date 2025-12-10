@@ -350,23 +350,19 @@ mod real {
 
     /// Asynchronous video decoder running on a separate thread.
     ///
-    /// Useful for pre-fetching frames during preview to avoid stuttering, or for decoupling decoding
-    /// speed from rendering speed.
+    /// Useful for pre-fetching frames during preview to avoid stuttering.
     #[derive(Debug)]
-    pub struct AsyncDecoder {
+    pub struct ThreadedDecoder {
         cmd_tx: Sender<VideoCommand>,
         resp_rx: Receiver<VideoResponse>,
         mode: RenderMode,
     }
 
-    impl AsyncDecoder {
+    impl ThreadedDecoder {
         pub fn new(path: PathBuf, mode: RenderMode) -> Result<Self> {
             let (cmd_tx, cmd_rx) = unbounded();
-            let (resp_tx, resp_rx) = if mode == RenderMode::Export {
-                bounded(0)
-            } else {
-                bounded(5)
-            };
+            // In Threaded mode (Preview), we use a small buffer.
+            let (resp_tx, resp_rx) = bounded(5);
 
             thread::spawn(move || {
                 let mut decoder = match video_rs::Decoder::new(path.clone()) {
@@ -381,21 +377,15 @@ mod real {
                 let mut current_decoder_time = 0.0;
 
                 loop {
-                    let target_time = if mode == RenderMode::Preview {
-                        match cmd_rx.recv() {
-                            Ok(VideoCommand::GetFrame(mut t)) => {
-                                while let Ok(VideoCommand::GetFrame(next_t)) = cmd_rx.try_recv() {
-                                    t = next_t;
-                                }
-                                t
+                    // In Preview/Threaded mode, we skip outdated requests
+                    let target_time = match cmd_rx.recv() {
+                        Ok(VideoCommand::GetFrame(mut t)) => {
+                            while let Ok(VideoCommand::GetFrame(next_t)) = cmd_rx.try_recv() {
+                                t = next_t;
                             }
-                            Err(_) => break,
+                            t
                         }
-                    } else {
-                        match cmd_rx.recv() {
-                            Ok(VideoCommand::GetFrame(t)) => t,
-                            Err(_) => break,
-                        }
+                        Err(_) => break,
                     };
 
                     // Check Cache
@@ -413,15 +403,12 @@ mod real {
                         continue;
                     }
 
-                    // Decode
+                    // Seek if needed
                     let diff = target_time - current_decoder_time;
                     if diff < -0.1 || diff > 2.0 {
                         let ms = (target_time * 1000.0) as i64;
-                        if let Err(e) = decoder.seek(ms) {
-                            if mode == RenderMode::Export {
-                                let _ = resp_tx
-                                    .send(VideoResponse::Error(format!("Seek failed: {}", e)));
-                            }
+                        if let Err(_) = decoder.seek(ms) {
+                            // In preview, ignore seek errors or just continue
                             continue;
                         }
                         current_decoder_time = target_time;
@@ -481,25 +468,15 @@ mod real {
                                 }
                             }
                             Err(_) => {
-                                if mode == RenderMode::Export {
-                                    let _ = resp_tx.send(VideoResponse::EndOfStream);
-                                }
+                                // End of stream or error, stop trying to decode
                                 break;
                             }
                         }
                     }
 
-                    if !found && mode == RenderMode::Export {
-                        // Could not find frame
-                        // Check if we already sent error/EOS
-                        // If not, send error
-                        // But we can't easily check channel state.
-                        // Let's assume if the loop broke, we failed to find it.
-                        // Ideally we should track if we sent response.
-                        // But resp_tx.send blocks in Export mode (size 0).
-                        // So if we didn't send anything, main thread is waiting.
-                        // We MUST send something.
-                        let _ = resp_tx.send(VideoResponse::Error("Frame not found".to_string()));
+                    if !found {
+                        // In preview, if we didn't find the frame, we just don't send anything.
+                        // The UI will keep the old frame.
                     }
                 }
             });
@@ -516,10 +493,118 @@ mod real {
         }
 
         pub fn get_response(&self) -> Option<VideoResponse> {
-            if self.mode == RenderMode::Export {
-                self.resp_rx.recv().ok()
+            self.resp_rx.try_recv().ok()
+        }
+    }
+
+    /// Synchronous video decoder running on the main thread.
+    ///
+    /// Essential for deterministic Export mode to ensure frame-perfect decoding.
+    pub struct SyncDecoder {
+        decoder: video_rs::Decoder,
+        current_time: f64,
+        last_frame: Option<(f64, Vec<u8>, u32, u32)>,
+    }
+
+    impl std::fmt::Debug for SyncDecoder {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("SyncDecoder")
+                .field("current_time", &self.current_time)
+                .field("last_frame", &self.last_frame.as_ref().map(|(t, _, w, h)| (*t, *w, *h)))
+                .finish()
+        }
+    }
+
+    impl SyncDecoder {
+        pub fn new(path: PathBuf) -> Result<Self> {
+            let decoder = video_rs::Decoder::new(path)?;
+            Ok(Self {
+                decoder,
+                current_time: -1.0,
+                last_frame: None,
+            })
+        }
+
+        pub fn get_frame_at(&mut self, target_time: f64) -> Result<(f64, Vec<u8>, u32, u32)> {
+            // 1. Check if we need to seek
+            // If target is behind current, or too far ahead (more than 1 sec), seek.
+            if target_time < self.current_time || (target_time - self.current_time) > 1.0 {
+                let ms = (target_time * 1000.0) as i64;
+                self.decoder.seek(ms)?;
+                // Reset current time to slightly before target to account for seek precision
+                self.current_time = target_time - 0.1;
+            }
+
+            // 2. Decode loop (Blocking)
+            let max_steps = 200; // Safety break
+            let mut steps = 0;
+
+            loop {
+                match self.decoder.decode() {
+                    Ok((time, frame)) => {
+                        steps += 1;
+                        let t = time.as_secs_f64();
+                        self.current_time = t;
+
+                        // Check if we reached target
+                        // We accept frames that are equal or slightly after target
+                        if t >= target_time - 0.01 {
+                             let shape_vec = frame.shape().to_vec();
+                             let shape = &shape_vec;
+
+                             if shape.len() == 3 && shape[2] >= 3 {
+                                let h = shape[0] as u32;
+                                let w = shape[1] as u32;
+                                let (bytes, _) = frame.into_raw_vec_and_offset();
+                                let data = if shape[2] == 3 {
+                                    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+                                    for chunk in bytes.chunks(3) {
+                                        rgba.extend_from_slice(chunk);
+                                        rgba.push(255);
+                                    }
+                                    rgba
+                                } else {
+                                    bytes
+                                };
+
+                                let result = (t, data, w, h);
+                                self.last_frame = Some(result.clone());
+                                return Ok(result);
+                             }
+                        }
+
+                        if steps > max_steps {
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        // EOF
+                        break;
+                    }
+                }
+            }
+
+            // If we failed to find a new frame (EOF or max steps), return the last one
+            if let Some(frame) = &self.last_frame {
+                Ok(frame.clone())
             } else {
-                self.resp_rx.try_recv().ok()
+                Err(anyhow::anyhow!("Could not decode frame at {}", target_time))
+            }
+        }
+    }
+
+    /// Wrapper that selects the backend strategy based on RenderMode.
+    #[derive(Debug)]
+    pub enum VideoLoader {
+        Threaded(ThreadedDecoder),
+        Sync(SyncDecoder),
+    }
+
+    impl VideoLoader {
+        pub fn new(path: PathBuf, mode: RenderMode) -> Result<Self> {
+            match mode {
+                RenderMode::Preview => Ok(Self::Threaded(ThreadedDecoder::new(path, mode)?)),
+                RenderMode::Export => Ok(Self::Sync(SyncDecoder::new(path)?)),
             }
         }
     }
@@ -600,13 +685,13 @@ pub mod mock {
     pub struct Frame;
 
     #[derive(Debug)]
-    pub struct AsyncDecoder {
+    pub struct ThreadedDecoder {
         cmd_tx: Sender<VideoCommand>,
         resp_rx: Receiver<VideoResponse>,
         mode: RenderMode,
     }
 
-    impl AsyncDecoder {
+    impl ThreadedDecoder {
         pub fn new(_path: PathBuf, mode: RenderMode) -> Result<Self> {
             let (cmd_tx, cmd_rx) = unbounded();
             let (resp_tx, resp_rx) = bounded(5);
@@ -618,8 +703,8 @@ pub mod mock {
                         Err(_) => break,
                     };
                     thread::sleep(std::time::Duration::from_millis(10));
-                    // Return Mock Frame
-                    let _ = resp_tx.send(VideoResponse::Frame(t, vec![255; 100], 10, 10));
+                    // Return Mock Frame (Red)
+                    let _ = resp_tx.send(VideoResponse::Frame(t, vec![255, 0, 0, 255], 1, 1));
                 }
             });
 
@@ -633,10 +718,39 @@ pub mod mock {
             let _ = self.cmd_tx.send(VideoCommand::GetFrame(time));
         }
         pub fn get_response(&self) -> Option<VideoResponse> {
-            if self.mode == RenderMode::Export {
-                self.resp_rx.recv().ok()
-            } else {
-                self.resp_rx.try_recv().ok()
+            self.resp_rx.try_recv().ok()
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct SyncDecoder {
+        last_time: f64,
+    }
+
+    impl SyncDecoder {
+        pub fn new(_path: PathBuf) -> Result<Self> {
+            Ok(Self { last_time: 0.0 })
+        }
+        pub fn get_frame_at(&mut self, target_time: f64) -> Result<(f64, Vec<u8>, u32, u32)> {
+             // Simulate work
+             std::thread::sleep(std::time::Duration::from_millis(5));
+             self.last_time = target_time;
+             // Return dummy red frame
+             Ok((target_time, vec![255, 0, 0, 255], 1, 1))
+        }
+    }
+
+    #[derive(Debug)]
+    pub enum VideoLoader {
+        Threaded(ThreadedDecoder),
+        Sync(SyncDecoder),
+    }
+
+    impl VideoLoader {
+        pub fn new(path: PathBuf, mode: RenderMode) -> Result<Self> {
+            match mode {
+                RenderMode::Preview => Ok(Self::Threaded(ThreadedDecoder::new(path, mode)?)),
+                RenderMode::Export => Ok(Self::Sync(SyncDecoder::new(path)?)),
             }
         }
     }

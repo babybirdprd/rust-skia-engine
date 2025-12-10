@@ -30,7 +30,7 @@ use tempfile::NamedTempFile;
 use unicode_segmentation::UnicodeSegmentation;
 
 // Video imports
-use crate::video_wrapper::{AsyncDecoder, RenderMode, VideoResponse};
+use crate::video_wrapper::{VideoLoader, RenderMode, VideoResponse};
 
 /// Specifies the data source for a video node.
 pub enum VideoSource {
@@ -1530,7 +1530,7 @@ pub struct VideoNode {
     pub object_fit: ObjectFit,
     current_frame: Mutex<Option<(f64, Image)>>,
 
-    decoder: Option<AsyncDecoder>,
+    loader: Option<VideoLoader>,
     render_mode: RenderMode,
 
     // Keep temp file alive
@@ -1542,9 +1542,9 @@ pub struct VideoNode {
 
 impl Clone for VideoNode {
     fn clone(&self) -> Self {
-        let decoder = if self.decoder.is_some() {
-            // Create new decoder pointing to same file.
-            AsyncDecoder::new(self.path.clone(), self.render_mode).ok()
+        let loader = if self.loader.is_some() {
+            // Create new loader pointing to same file.
+            VideoLoader::new(self.path.clone(), self.render_mode).ok()
         } else {
             None
         };
@@ -1554,7 +1554,7 @@ impl Clone for VideoNode {
             style: self.style.clone(),
             object_fit: self.object_fit,
             current_frame: Mutex::new(None),
-            decoder,
+            loader,
             render_mode: self.render_mode,
             temp_file: self.temp_file.clone(),
             path: self.path.clone(),
@@ -1574,14 +1574,20 @@ impl VideoNode {
             }
         };
 
-        let decoder = AsyncDecoder::new(path.clone(), mode).ok();
+        let loader = match VideoLoader::new(path.clone(), mode) {
+            Ok(l) => Some(l),
+            Err(e) => {
+                eprintln!("Failed to create VideoLoader for {:?}: {}", path, e);
+                None
+            }
+        };
 
         Self {
             opacity: Animated::new(1.0),
             style: Style::DEFAULT,
             object_fit: ObjectFit::Cover,
             current_frame: Mutex::new(None),
-            decoder,
+            loader,
             render_mode: mode,
             temp_file,
             path,
@@ -1608,12 +1614,36 @@ impl Element for VideoNode {
     fn update(&mut self, time: f64) -> bool {
         self.opacity.update(time);
 
-        if let Some(decoder) = &self.decoder {
-            decoder.send_request(time);
+        if let Some(loader) = &mut self.loader {
+            match loader {
+                VideoLoader::Threaded(decoder) => {
+                    decoder.send_request(time);
 
-            if let Some(resp) = decoder.get_response() {
-                match resp {
-                    VideoResponse::Frame(t, data, w, h) => {
+                    if let Some(resp) = decoder.get_response() {
+                        match resp {
+                            VideoResponse::Frame(t, data, w, h) => {
+                                let data = Data::new_copy(&data);
+                                let info = skia_safe::ImageInfo::new(
+                                    (w as i32, h as i32),
+                                    ColorType::RGBA8888,
+                                    AlphaType::Unpremul,
+                                    None,
+                                );
+
+                                if let Some(img) = skia_safe::images::raster_from_data(
+                                    &info,
+                                    data,
+                                    (w * 4) as usize,
+                                ) {
+                                    *self.current_frame.lock().unwrap() = Some((t, img));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                VideoLoader::Sync(decoder) => match decoder.get_frame_at(time) {
+                    Ok((t, data, w, h)) => {
                         let data = Data::new_copy(&data);
                         let info = skia_safe::ImageInfo::new(
                             (w as i32, h as i32),
@@ -1628,18 +1658,10 @@ impl Element for VideoNode {
                             *self.current_frame.lock().unwrap() = Some((t, img));
                         }
                     }
-                    VideoResponse::EndOfStream => {
-                        if self.render_mode == RenderMode::Export {
-                            return false;
-                        }
+                    Err(e) => {
+                        eprintln!("Sync Video Error: {}", e);
                     }
-                    VideoResponse::Error(e) => {
-                        if self.render_mode == RenderMode::Export {
-                            eprintln!("Video Error: {}", e);
-                            return false;
-                        }
-                    }
-                }
+                },
             }
         }
         true
