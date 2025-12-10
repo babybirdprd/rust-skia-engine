@@ -30,7 +30,7 @@ use tempfile::NamedTempFile;
 use unicode_segmentation::UnicodeSegmentation;
 
 // Video imports
-use crate::video_wrapper::{AsyncDecoder, RenderMode, VideoResponse};
+use crate::video_wrapper::{AsyncDecoder, BlockingDecoder, RenderMode, VideoResponse};
 
 /// Specifies the data source for a video node.
 pub enum VideoSource {
@@ -1520,6 +1520,13 @@ impl Element for ImageNode {
 }
 
 // --- Video Node ---
+
+#[derive(Debug)]
+pub enum VideoDecoder {
+    Async(AsyncDecoder),
+    Blocking(BlockingDecoder),
+}
+
 /// A node that plays a video file.
 ///
 /// Handles async decoding and frame buffering.
@@ -1530,7 +1537,7 @@ pub struct VideoNode {
     pub object_fit: ObjectFit,
     current_frame: Mutex<Option<(f64, Image)>>,
 
-    decoder: Option<AsyncDecoder>,
+    decoder: Option<VideoDecoder>,
     render_mode: RenderMode,
 
     // Keep temp file alive
@@ -1544,7 +1551,14 @@ impl Clone for VideoNode {
     fn clone(&self) -> Self {
         let decoder = if self.decoder.is_some() {
             // Create new decoder pointing to same file.
-            AsyncDecoder::new(self.path.clone(), self.render_mode).ok()
+            match self.render_mode {
+                RenderMode::Preview => {
+                    AsyncDecoder::new(self.path.clone()).ok().map(VideoDecoder::Async)
+                },
+                RenderMode::Export => {
+                    BlockingDecoder::new(self.path.clone()).ok().map(VideoDecoder::Blocking)
+                }
+            }
         } else {
             None
         };
@@ -1574,7 +1588,10 @@ impl VideoNode {
             }
         };
 
-        let decoder = AsyncDecoder::new(path.clone(), mode).ok();
+        let decoder = match mode {
+            RenderMode::Preview => AsyncDecoder::new(path.clone()).ok().map(VideoDecoder::Async),
+            RenderMode::Export => BlockingDecoder::new(path.clone()).ok().map(VideoDecoder::Blocking),
+        };
 
         Self {
             opacity: Animated::new(1.0),
@@ -1608,36 +1625,67 @@ impl Element for VideoNode {
     fn update(&mut self, time: f64) -> bool {
         self.opacity.update(time);
 
-        if let Some(decoder) = &self.decoder {
-            decoder.send_request(time);
+        if let Some(decoder) = &mut self.decoder {
+            match decoder {
+                VideoDecoder::Async(d) => {
+                     d.send_request(time);
 
-            if let Some(resp) = decoder.get_response() {
-                match resp {
-                    VideoResponse::Frame(t, data, w, h) => {
-                        let data = Data::new_copy(&data);
-                        let info = skia_safe::ImageInfo::new(
-                            (w as i32, h as i32),
-                            ColorType::RGBA8888,
-                            AlphaType::Unpremul,
-                            None,
-                        );
+                    if let Some(resp) = d.get_response() {
+                        match resp {
+                            VideoResponse::Frame(t, data, w, h) => {
+                                let data = Data::new_copy(&data);
+                                let info = skia_safe::ImageInfo::new(
+                                    (w as i32, h as i32),
+                                    ColorType::RGBA8888,
+                                    AlphaType::Unpremul,
+                                    None,
+                                );
 
-                        if let Some(img) =
-                            skia_safe::images::raster_from_data(&info, data, (w * 4) as usize)
-                        {
-                            *self.current_frame.lock().unwrap() = Some((t, img));
+                                if let Some(img) =
+                                    skia_safe::images::raster_from_data(&info, data, (w * 4) as usize)
+                                {
+                                    *self.current_frame.lock().unwrap() = Some((t, img));
+                                }
+                            }
+                            _ => {}
                         }
                     }
-                    VideoResponse::EndOfStream => {
-                        if self.render_mode == RenderMode::Export {
-                            return false;
+                },
+                VideoDecoder::Blocking(d) => {
+                    // Check if we already have this frame
+                    let mut current = self.current_frame.lock().unwrap();
+                    if let Some((t, _)) = *current {
+                        if (t - time).abs() < 0.001 {
+                            // Already have it
+                            return true;
                         }
                     }
-                    VideoResponse::Error(e) => {
-                        if self.render_mode == RenderMode::Export {
-                            eprintln!("Video Error: {}", e);
+
+                    match d.seek_and_decode(time) {
+                         Ok(VideoResponse::Frame(t, data, w, h)) => {
+                                let data = Data::new_copy(&data);
+                                let info = skia_safe::ImageInfo::new(
+                                    (w as i32, h as i32),
+                                    ColorType::RGBA8888,
+                                    AlphaType::Unpremul,
+                                    None,
+                                );
+
+                                if let Some(img) =
+                                    skia_safe::images::raster_from_data(&info, data, (w * 4) as usize)
+                                {
+                                    *current = Some((t, img));
+                                }
+                        },
+                        Ok(VideoResponse::EndOfStream) => {
+                            // Loop or hold last frame?
+                            // For now, do nothing (hold last)
+                        },
+                         Err(e) => {
+                            eprintln!("Video seek error: {}", e);
                             return false;
-                        }
+                         }
+                         _ => {}
                     }
                 }
             }
