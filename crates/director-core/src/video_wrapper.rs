@@ -356,17 +356,12 @@ mod real {
     pub struct AsyncDecoder {
         cmd_tx: Sender<VideoCommand>,
         resp_rx: Receiver<VideoResponse>,
-        mode: RenderMode,
     }
 
     impl AsyncDecoder {
-        pub fn new(path: PathBuf, mode: RenderMode) -> Result<Self> {
+        pub fn new(path: PathBuf) -> Result<Self> {
             let (cmd_tx, cmd_rx) = unbounded();
-            let (resp_tx, resp_rx) = if mode == RenderMode::Export {
-                bounded(0)
-            } else {
-                bounded(5)
-            };
+            let (resp_tx, resp_rx) = bounded(5);
 
             thread::spawn(move || {
                 let mut decoder = match video_rs::Decoder::new(path.clone()) {
@@ -381,21 +376,15 @@ mod real {
                 let mut current_decoder_time = 0.0;
 
                 loop {
-                    let target_time = if mode == RenderMode::Preview {
-                        match cmd_rx.recv() {
-                            Ok(VideoCommand::GetFrame(mut t)) => {
-                                while let Ok(VideoCommand::GetFrame(next_t)) = cmd_rx.try_recv() {
-                                    t = next_t;
-                                }
-                                t
+                    let target_time = match cmd_rx.recv() {
+                        Ok(VideoCommand::GetFrame(mut t)) => {
+                            // Debounce: get latest request
+                            while let Ok(VideoCommand::GetFrame(next_t)) = cmd_rx.try_recv() {
+                                t = next_t;
                             }
-                            Err(_) => break,
+                            t
                         }
-                    } else {
-                        match cmd_rx.recv() {
-                            Ok(VideoCommand::GetFrame(t)) => t,
-                            Err(_) => break,
-                        }
+                        Err(_) => break,
                     };
 
                     // Check Cache
@@ -417,11 +406,7 @@ mod real {
                     let diff = target_time - current_decoder_time;
                     if diff < -0.1 || diff > 2.0 {
                         let ms = (target_time * 1000.0) as i64;
-                        if let Err(e) = decoder.seek(ms) {
-                            if mode == RenderMode::Export {
-                                let _ = resp_tx
-                                    .send(VideoResponse::Error(format!("Seek failed: {}", e)));
-                            }
+                        if let Err(_) = decoder.seek(ms) {
                             continue;
                         }
                         current_decoder_time = target_time;
@@ -481,34 +466,14 @@ mod real {
                                 }
                             }
                             Err(_) => {
-                                if mode == RenderMode::Export {
-                                    let _ = resp_tx.send(VideoResponse::EndOfStream);
-                                }
                                 break;
                             }
                         }
                     }
-
-                    if !found && mode == RenderMode::Export {
-                        // Could not find frame
-                        // Check if we already sent error/EOS
-                        // If not, send error
-                        // But we can't easily check channel state.
-                        // Let's assume if the loop broke, we failed to find it.
-                        // Ideally we should track if we sent response.
-                        // But resp_tx.send blocks in Export mode (size 0).
-                        // So if we didn't send anything, main thread is waiting.
-                        // We MUST send something.
-                        let _ = resp_tx.send(VideoResponse::Error("Frame not found".to_string()));
-                    }
                 }
             });
 
-            Ok(Self {
-                cmd_tx,
-                resp_rx,
-                mode,
-            })
+            Ok(Self { cmd_tx, resp_rx })
         }
 
         pub fn send_request(&self, time: f64) {
@@ -516,11 +481,77 @@ mod real {
         }
 
         pub fn get_response(&self) -> Option<VideoResponse> {
-            if self.mode == RenderMode::Export {
-                self.resp_rx.recv().ok()
-            } else {
-                self.resp_rx.try_recv().ok()
+            self.resp_rx.try_recv().ok()
+        }
+    }
+
+    /// Synchronous video decoder for deterministic exports.
+    #[derive(Debug)]
+    pub struct BlockingDecoder {
+        decoder: video_rs::Decoder,
+    }
+
+    impl BlockingDecoder {
+        pub fn new(path: PathBuf) -> Result<Self> {
+            let decoder = video_rs::Decoder::new(path)?;
+            Ok(Self { decoder })
+        }
+
+        pub fn seek_and_decode(&mut self, target_time: f64) -> Result<VideoResponse> {
+            // Force seek to ensuring we are at the right place
+            // Seeking to exact millisecond prevents drift
+            let ms = (target_time * 1000.0) as i64;
+            self.decoder.seek(ms)?;
+
+            let max_steps = 300; // Allow sufficient steps to find the frame after seek
+            let epsilon = 0.001; // Strict epsilon for frame matching
+
+            for _ in 0..max_steps {
+                match self.decoder.decode() {
+                    Ok((time, frame)) => {
+                        let t = time.as_secs_f64();
+
+                        // If we are significantly past the target, stop.
+                        // But since we seeked to target, we should be close or slightly before keyframe.
+                        if t > target_time + 0.2 {
+                             // Passed it?
+                             // Maybe return what we have or error?
+                             // Let's keep strict for now.
+                        }
+
+                        // Check if this frame matches target
+                        // We want >= target, but close enough
+                        if t >= target_time - epsilon {
+                            // Decode frame data
+                             let shape = frame.shape();
+                                if shape.len() == 3 && shape[2] >= 3 {
+                                    let h = shape[0] as u32;
+                                    let w = shape[1] as u32;
+                                    let channels = shape[2];
+                                    let (bytes, _) = frame.into_raw_vec_and_offset();
+
+                                    let data = if channels == 3 {
+                                        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+                                        for chunk in bytes.chunks(3) {
+                                            rgba.extend_from_slice(chunk);
+                                            rgba.push(255);
+                                        }
+                                        rgba
+                                    } else {
+                                        bytes
+                                    };
+
+                                    return Ok(VideoResponse::Frame(t, data, w, h));
+                                }
+                        }
+                    }
+                    Err(_) => {
+                        return Ok(VideoResponse::EndOfStream);
+                    }
+                }
             }
+
+            Err(anyhow::anyhow!("Frame not found for timestamp {}", target_time))
         }
     }
 }
@@ -543,7 +574,7 @@ pub mod mock {
             Ok(Self)
         }
         pub fn decode(&mut self) -> Result<(Time, Array3<u8>), anyhow::Error> {
-            Ok((Time, Array3::zeros((10, 10, 3))))
+            Ok((Time::from_secs(0.0), Array3::zeros((10, 10, 3))))
         }
         pub fn seek(&mut self, _ms: i64) -> Result<(), anyhow::Error> {
             Ok(())
@@ -581,19 +612,19 @@ pub mod mock {
     }
 
     #[derive(Clone, Copy, Debug, PartialEq)]
-    pub struct Time;
+    pub struct Time(f64);
     impl Time {
-        pub fn from_nth_of_second(_n: usize, _fps: u32) -> Self {
-            Self
+        pub fn from_nth_of_second(n: usize, fps: u32) -> Self {
+            Self(n as f64 / fps as f64)
         }
-        pub fn from_secs(_s: f64) -> Self {
-            Self
+        pub fn from_secs(s: f64) -> Self {
+            Self(s)
         }
-        pub fn from_secs_f64(_s: f64) -> Self {
-            Self
+        pub fn from_secs_f64(s: f64) -> Self {
+            Self(s)
         }
         pub fn as_secs_f64(&self) -> f64 {
-            0.0
+            self.0
         }
     }
 
@@ -603,11 +634,10 @@ pub mod mock {
     pub struct AsyncDecoder {
         cmd_tx: Sender<VideoCommand>,
         resp_rx: Receiver<VideoResponse>,
-        mode: RenderMode,
     }
 
     impl AsyncDecoder {
-        pub fn new(_path: PathBuf, mode: RenderMode) -> Result<Self> {
+        pub fn new(_path: PathBuf) -> Result<Self> {
             let (cmd_tx, cmd_rx) = unbounded();
             let (resp_tx, resp_rx) = bounded(5);
 
@@ -619,25 +649,37 @@ pub mod mock {
                     };
                     thread::sleep(std::time::Duration::from_millis(10));
                     // Return Mock Frame
-                    let _ = resp_tx.send(VideoResponse::Frame(t, vec![255; 100], 10, 10));
+                    let _ = resp_tx.send(VideoResponse::Frame(t, vec![255; 400], 10, 10));
                 }
             });
 
             Ok(Self {
                 cmd_tx,
                 resp_rx,
-                mode,
             })
         }
         pub fn send_request(&self, time: f64) {
             let _ = self.cmd_tx.send(VideoCommand::GetFrame(time));
         }
         pub fn get_response(&self) -> Option<VideoResponse> {
-            if self.mode == RenderMode::Export {
-                self.resp_rx.recv().ok()
-            } else {
-                self.resp_rx.try_recv().ok()
-            }
+            self.resp_rx.try_recv().ok()
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct BlockingDecoder {
+         // Mock state
+    }
+
+    impl BlockingDecoder {
+        pub fn new(_path: PathBuf) -> Result<Self> {
+            Ok(Self {})
+        }
+
+        pub fn seek_and_decode(&mut self, target_time: f64) -> Result<VideoResponse> {
+            // Mock behavior: return frame for requested time
+            let t = target_time;
+            Ok(VideoResponse::Frame(t, vec![255; 400], 10, 10))
         }
     }
 }
