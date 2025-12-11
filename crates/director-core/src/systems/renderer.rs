@@ -10,6 +10,7 @@ use crate::errors::RenderError;
 use skia_safe::{ColorType, AlphaType, ColorSpace, RuntimeEffect, Data, runtime_effect::ChildPtr};
 use crate::video_wrapper::{Encoder, EncoderSettings, Locator, Time};
 use ndarray::Array3;
+use tracing::{instrument, error, debug};
 
 #[cfg(feature = "vulkan")]
 use skia_safe::gpu::{DirectContext, SurfaceOrigin, Budgeted};
@@ -38,6 +39,7 @@ pub type GpuContext = ();
 /// * `gpu_context` - Optional GPU context for hardware acceleration.
 /// * `audio_track_path` - Optional path to a background audio track (deprecated; use `director.add_global_audio`).
 #[allow(unused_variables)]
+#[instrument(level = "info", skip(director, gpu_context), fields(width = director.width, height = director.height, fps = director.fps))]
 pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Option<&mut GpuContext>, audio_track_path: Option<PathBuf>) -> Result<()> {
     let width = director.width;
     let height = director.height;
@@ -171,7 +173,7 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
                      render_recursive(&director.scene, assets_ref, item.scene_root, canvas, 1.0)?;
                  }
              }
-             if time < 0.1 { eprintln!("[Frame] render complete"); }
+             if time < 0.1 { debug!("[Frame] render complete"); }
              Ok(())
         };
 
@@ -474,10 +476,10 @@ fn draw_transition(
              paint.set_shader(Some(shader));
              canvas.draw_rect(skia_safe::Rect::from_wh(width as f32, height as f32), &paint);
          } else {
-             eprintln!("Failed to make shader");
+             error!("Failed to make shader");
          }
     } else {
-        eprintln!("Shader compilation error: {:?}", result.err());
+        error!("Shader compilation error: {:?}", result.err());
     }
 }
 

@@ -12,6 +12,7 @@ use crate::AssetLoader;
 use rhai::{Engine, Map, Module};
 use skia_safe::Path;
 use std::collections::HashMap;
+use tracing::error;
 use std::sync::{Arc, Mutex};
 use taffy::geometry::Rect;
 use taffy::style::{
@@ -1319,7 +1320,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         |scene: &mut SceneHandle, comp_def: MovieHandle| {
             // Cycle Detection
             if Arc::ptr_eq(&scene.director, &comp_def.director) {
-                eprintln!("Error: Cycle detected. A composition cannot contain itself.");
+                error!("Cycle detected. A composition cannot contain itself.");
                 let mut d = scene.director.lock().unwrap();
                 let id = d.scene.add_node(Box::new(BoxNode::new()));
                 return NodeHandle {
@@ -1354,7 +1355,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         |scene: &mut SceneHandle, comp_def: MovieHandle, props: rhai::Map| {
             // Cycle Detection
             if Arc::ptr_eq(&scene.director, &comp_def.director) {
-                eprintln!("Error: Cycle detected. A composition cannot contain itself.");
+                error!("Cycle detected. A composition cannot contain itself.");
                 let mut d = scene.director.lock().unwrap();
                 let id = d.scene.add_node(Box::new(BoxNode::new()));
                 return NodeHandle {
@@ -1771,7 +1772,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
                     n.path_animation = Some(PathAnimationState { path, progress });
                 } else {
-                    eprintln!("Failed to parse SVG path: {}", svg);
+                    error!("Failed to parse SVG path: {}", svg);
                 }
             }
         },
@@ -1793,7 +1794,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
         let samples = crate::audio::load_audio_bytes(&bytes, d.audio_mixer.sample_rate)
             .unwrap_or_else(|e| {
-                eprintln!("Audio error: {}", e);
+                error!("Audio error: {}", e);
                 Vec::new()
             });
 
@@ -1809,7 +1810,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
         let samples = crate::audio::load_audio_bytes(&bytes, d.audio_mixer.sample_rate)
             .unwrap_or_else(|e| {
-                eprintln!("Audio error: {}", e);
+                error!("Audio error: {}", e);
                 Vec::new()
             });
 

@@ -71,3 +71,11 @@ The project is a Cargo Workspace with the following members:
 *   **Verify Changes:** Always run verification tests in `crates/director-core/tests/`.
 *   **Docs:** Update `docs/` when changing API surfaces.
 *   **Build:** Use `cargo build -p director-cli` to build the engine.
+
+## 6. Logging & Debugging
+*   **Framework:** Use the `tracing` ecosystem for all logging.
+    *   **Core:** Use `tracing::info!`, `tracing::warn!`, `tracing::error!` (and `debug!`/`trace!`).
+    *   **Context:** Use `#[tracing::instrument]` on critical functions (`Director::update`, `LayoutEngine::compute_layout`, `AssetLoader::load_bytes`).
+*   **CLI:** `director-cli` initializes `tracing_subscriber` writing to `stderr`.
+    *   **Output:** Supports strict NDJSON (`--log-format=json`) for machine consumption.
+*   **Tests:** Initialize `tracing_subscriber` with `TestWriter` in tests to capture logs.

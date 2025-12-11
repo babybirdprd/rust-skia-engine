@@ -13,6 +13,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use taffy::geometry::Size;
 use taffy::style::{AvailableSpace, Style};
+use tracing::warn;
 
 /// A node for rendering rich text using Skia's native text layout engine (SkParagraph).
 pub struct TextNode {
@@ -394,6 +395,6 @@ impl Element for TextNode {
         _duration: f64,
         _easing: &str,
     ) {
-        eprintln!("[Warn] Text animators are temporarily disabled in the new layout engine.");
+        warn!("Text animators are temporarily disabled in the new layout engine.");
     }
 }

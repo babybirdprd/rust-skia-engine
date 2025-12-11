@@ -1,6 +1,7 @@
 use crate::scene::SceneGraph;
 use crate::types::NodeId;
 use taffy::prelude::*;
+use tracing::instrument;
 
 /// Manages the layout computation using the Taffy engine.
 ///
@@ -28,6 +29,7 @@ impl LayoutEngine {
     /// 2. **Sync Phase B**: Updates parent-child relationships in Taffy to match the Scene Graph.
     /// 3. **Compute**: Triggers `taffy.compute_layout` for all active scene roots.
     /// 4. **Write Back**: Copies the computed (x, y, w, h) from Taffy back to `SceneNode`.
+    #[instrument(level = "debug", skip(self, scene), fields(time = time))]
     pub fn compute_layout(&mut self, scene: &mut SceneGraph, width: i32, height: i32, time: f64) {
         // 1. Sync Phase A: Ensure Nodes Exist & Update Styles
         // Iterate over all potential node IDs in the Scene
@@ -146,19 +148,9 @@ impl LayoutEngine {
         if let Some(t_id) = self.node_map.get(&node_id) {
             let layout = self.taffy.layout(*t_id).unwrap();
 
-            // Debug Print
-            // println!("Node {}: Layout = {:?}", node_id, layout);
-            // Since we can't see NodeId easily (it's Uuid), I'll just print rect.
-            // Actually, we can check node type if we want, but let's just print basic info first.
-
             // Scope for mutable borrow
             let (children, mask_node) = {
                 let node = scene.get_node_mut(node_id).unwrap();
-
-                // Simple debug to identify huge or tiny nodes
-                if layout.size.width < 1.0 || layout.size.height < 1.0 {
-                    // println!("[Layout Warning] Node {:?} resolved to excessively small size: {:?}", node_id, layout.size);
-                }
 
                 node.layout_rect = skia_safe::Rect::from_xywh(
                     layout.location.x,
