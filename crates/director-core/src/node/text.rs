@@ -4,7 +4,7 @@ use crate::types::Color;
 use skia_safe::{
     image_filters, textlayout::{
         FontCollection, Paragraph, ParagraphBuilder, ParagraphStyle, TextStyle, TextAlign,
-        TextDirection,
+        TextDirection, TextHeightBehavior, StrutStyle,
     },
     Canvas, Paint, PaintStyle, Rect, TileMode,
 };
@@ -85,10 +85,33 @@ impl TextNode {
         node
     }
 
-    pub fn init_paragraph(&mut self) {
+    /// Builds the paragraph using current spans and style
+    fn build_paragraph(&self) -> Paragraph {
         let mut paragraph_style = ParagraphStyle::new();
         paragraph_style.set_text_align(TextAlign::Left);
         paragraph_style.set_text_direction(TextDirection::LTR);
+
+        // --- Fix for Vertical Centering ---
+        // 1. Disable "first ascent" which adds extra padding at the top
+        paragraph_style.set_text_height_behavior(TextHeightBehavior::DisableAll);
+
+        // 2. Configure StrutStyle to enforce consistent line heights
+        let mut strut_style = StrutStyle::new();
+        let default_font_families = vec!["Sans Serif"]; // Fallback
+
+        // We use the default font size for the strut, or a fallback of 20.0 if not set.
+        let font_size = self.default_font_size.current_value;
+
+        strut_style.set_font_families(&default_font_families);
+        strut_style.set_font_size(font_size);
+        strut_style.set_height(1.2); // 1.2 Multiplier for nice leading
+        strut_style.set_leading(0.0);
+        strut_style.set_strut_enabled(true);
+        strut_style.set_force_strut_height(true);
+        strut_style.set_height_override(true); // Ensures the multiplier is strictly obeyed
+
+        paragraph_style.set_strut_style(strut_style);
+        // ----------------------------------
 
         let font_collection_guard = self.font_collection.lock().unwrap();
         let mut builder = ParagraphBuilder::new(&paragraph_style, &*font_collection_guard);
@@ -139,10 +162,6 @@ impl TextNode {
             // 6. Stroke (Rich Text)
             if let Some(sw) = span.stroke_width {
                 if sw > 0.0 {
-                    // For SkParagraph, stroke is just a paint style on the foreground.
-                    // But we already set foreground paint for fill.
-                    // SkParagraph doesn't easily support both Fill AND Stroke in one style.
-                    // If we want stroke, we can set the paint style to stroke.
                     let mut stroke_paint = Paint::default();
                     stroke_paint.set_style(PaintStyle::Stroke);
                     stroke_paint.set_stroke_width(sw);
@@ -152,9 +171,6 @@ impl TextNode {
                     } else {
                          stroke_paint.set_color(skia_safe::Color::BLACK);
                     }
-                    // Overwriting foreground paint means NO FILL.
-                    // To do both, we would need two passes or separate spans.
-                    // For now, let's just use stroke if width > 0, implying "outline text".
                      text_style.set_foreground_paint(&stroke_paint);
                 }
             }
@@ -164,7 +180,11 @@ impl TextNode {
             builder.pop();
         }
 
-        *self.paragraph.lock().unwrap() = Some(builder.build());
+        builder.build()
+    }
+
+    pub fn init_paragraph(&mut self) {
+        *self.paragraph.lock().unwrap() = Some(self.build_paragraph());
         self.dirty_layout = true;
     }
 
@@ -172,73 +192,8 @@ impl TextNode {
         let p_guard = self.paragraph.lock().unwrap();
         if p_guard.is_none() {
             drop(p_guard);
-
-            let mut paragraph_style = ParagraphStyle::new();
-            paragraph_style.set_text_align(TextAlign::Left);
-            paragraph_style.set_text_direction(TextDirection::LTR);
-
-            let font_collection_guard = self.font_collection.lock().unwrap();
-            let mut builder = ParagraphBuilder::new(&paragraph_style, &*font_collection_guard);
-
-            for span in &self.spans {
-                 let mut text_style = TextStyle::new();
-                 let size = span.font_size.unwrap_or(self.default_font_size.current_value);
-                 text_style.set_font_size(size);
-
-                 let mut families = vec![];
-                 if let Some(f) = &span.font_family {
-                     families.push(f.as_str());
-                 } else {
-                     families.push("Sans Serif");
-                     families.push("Arial");
-                 }
-                 text_style.set_font_families(&families);
-
-                 let color = span.color.unwrap_or(self.default_color.current_value);
-                 let mut paint = Paint::default();
-                 paint.set_color(color.to_skia());
-                 paint.set_anti_alias(true);
-                 text_style.set_foreground_paint(&paint);
-
-                 if let Some(bg_color) = span.background_color {
-                    let mut bg_paint = Paint::default();
-                    bg_paint.set_color(bg_color.to_skia());
-                    bg_paint.set_anti_alias(true);
-                    text_style.set_background_paint(&bg_paint);
-                 }
-
-                if let Some(w) = span.font_weight {
-                    let weight = skia_safe::font_style::Weight::from(w as i32);
-                    let slant = if span.font_style.as_deref() == Some("italic") {
-                        skia_safe::font_style::Slant::Italic
-                    } else {
-                        skia_safe::font_style::Slant::Upright
-                    };
-                    text_style.set_font_style(skia_safe::FontStyle::new(weight, skia_safe::font_style::Width::NORMAL, slant));
-                }
-
-                if let Some(sw) = span.stroke_width {
-                    if sw > 0.0 {
-                        let mut stroke_paint = Paint::default();
-                        stroke_paint.set_style(PaintStyle::Stroke);
-                        stroke_paint.set_stroke_width(sw);
-                        stroke_paint.set_anti_alias(true);
-                        if let Some(sc) = span.stroke_color {
-                            stroke_paint.set_color(sc.to_skia());
-                        } else {
-                             stroke_paint.set_color(skia_safe::Color::BLACK);
-                        }
-                         text_style.set_foreground_paint(&stroke_paint);
-                    }
-                }
-
-                 builder.push_style(&text_style);
-                 builder.add_text(&span.text);
-                 builder.pop();
-            }
-
             let mut p_guard = self.paragraph.lock().unwrap();
-            *p_guard = Some(builder.build());
+            *p_guard = Some(self.build_paragraph());
         }
     }
 }
