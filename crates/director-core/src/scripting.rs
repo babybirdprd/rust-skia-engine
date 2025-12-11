@@ -401,6 +401,31 @@ fn parse_layout_style(props: &rhai::Map, style: &mut Style) {
             bottom: m,
         };
     }
+
+    // Position (Relative/Absolute)
+    if let Some(s) = props
+        .get("position")
+        .and_then(|v| v.clone().into_string().ok())
+    {
+        style.position = match s.as_str() {
+            "absolute" => taffy::style::Position::Absolute,
+            _ => taffy::style::Position::Relative,
+        };
+    }
+
+    // Insets (Top, Left, Right, Bottom) - reuse to_lpa closure
+    if let Some(v) = props.get("left").and_then(|v| to_lpa(v)) {
+        style.inset.left = v;
+    }
+    if let Some(v) = props.get("right").and_then(|v| to_lpa(v)) {
+        style.inset.right = v;
+    }
+    if let Some(v) = props.get("top").and_then(|v| to_lpa(v)) {
+        style.inset.top = v;
+    }
+    if let Some(v) = props.get("bottom").and_then(|v| to_lpa(v)) {
+        style.inset.bottom = v;
+    }
 }
 
 fn parse_object_fit(val: &str) -> Option<ObjectFit> {
@@ -835,31 +860,43 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         }
     });
 
-    engine.register_fn("add_lottie", |parent: &mut NodeHandle, path: &str| -> Result<NodeHandle, Box<rhai::EvalAltResult>> {
-        let mut d = parent.director.lock().unwrap();
-        // Propagate load error
-        let bytes = d.assets.loader.load_bytes(path).map_err(|e| e.to_string())?;
+    engine.register_fn(
+        "add_lottie",
+        |parent: &mut NodeHandle, path: &str| -> Result<NodeHandle, Box<rhai::EvalAltResult>> {
+            let mut d = parent.director.lock().unwrap();
+            // Propagate load error
+            let bytes = d
+                .assets
+                .loader
+                .load_bytes(path)
+                .map_err(|e| e.to_string())?;
 
-        match LottieNode::new(&bytes, HashMap::new(), &d.assets) {
-            Ok(lottie_node) => {
-                let id = d.scene.add_node(Box::new(lottie_node));
-                d.scene.add_child(parent.id, id);
-                Ok(NodeHandle {
-                    director: parent.director.clone(),
-                    id,
-                })
+            match LottieNode::new(&bytes, HashMap::new(), &d.assets) {
+                Ok(lottie_node) => {
+                    let id = d.scene.add_node(Box::new(lottie_node));
+                    d.scene.add_child(parent.id, id);
+                    Ok(NodeHandle {
+                        director: parent.director.clone(),
+                        id,
+                    })
+                }
+                Err(e) => Err(format!("Failed to parse lottie: {}", e).into()),
             }
-            Err(e) => {
-                Err(format!("Failed to parse lottie: {}", e).into())
-            }
-        }
-    });
+        },
+    );
 
     engine.register_fn(
         "add_lottie",
-        |parent: &mut NodeHandle, path: &str, props: rhai::Map| -> Result<NodeHandle, Box<rhai::EvalAltResult>> {
+        |parent: &mut NodeHandle,
+         path: &str,
+         props: rhai::Map|
+         -> Result<NodeHandle, Box<rhai::EvalAltResult>> {
             let mut d = parent.director.lock().unwrap();
-            let bytes = d.assets.loader.load_bytes(path).map_err(|e| e.to_string())?;
+            let bytes = d
+                .assets
+                .loader
+                .load_bytes(path)
+                .map_err(|e| e.to_string())?;
 
             let mut assets_map = HashMap::new();
             if let Some(assets_prop) = props
@@ -903,9 +940,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
                         id,
                     })
                 }
-                Err(e) => {
-                    Err(format!("Failed to parse lottie: {}", e).into())
-                }
+                Err(e) => Err(format!("Failed to parse lottie: {}", e).into()),
             }
         },
     );
