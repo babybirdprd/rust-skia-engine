@@ -3,6 +3,7 @@ use crate::director::Director;
 use crate::element::Element;
 use crate::systems::layout::LayoutEngine;
 use crate::systems::renderer::render_recursive;
+use crate::errors::RenderError;
 use crate::types::{Color, ObjectFit};
 use skia_safe::{
     color_filters,
@@ -298,7 +299,7 @@ impl Element for EffectNode {
         rect: Rect,
         opacity: f32,
         draw_children: &mut dyn FnMut(&Canvas),
-    ) {
+    ) -> Result<(), RenderError> {
         let resolution = (rect.width(), rect.height());
         let filter = build_effect_filter(
             &self.effects,
@@ -317,6 +318,7 @@ impl Element for EffectNode {
         canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&paint));
         draw_children(canvas);
         canvas.restore();
+        Ok(())
     }
 
     fn animate_property(
@@ -444,7 +446,7 @@ impl Element for BoxNode {
         rect: Rect,
         opacity: f32,
         draw_children: &mut dyn FnMut(&Canvas),
-    ) {
+    ) -> Result<(), RenderError> {
         let local_opacity = self.opacity.current_value * opacity;
         let radius = self.border_radius.current_value;
         let rrect = RRect::new_rect_xy(&rect, radius, radius);
@@ -511,6 +513,7 @@ impl Element for BoxNode {
 
             canvas.draw_rrect(rrect, &border_paint);
         }
+        Ok(())
     }
 
     fn animate_property(
@@ -621,7 +624,7 @@ impl Element for ImageNode {
         rect: Rect,
         parent_opacity: f32,
         draw_children: &mut dyn FnMut(&Canvas),
-    ) {
+    ) -> Result<(), RenderError> {
         let op = self.opacity.current_value * parent_opacity;
         let mut paint = Paint::new(Color4f::new(1.0, 1.0, 1.0, op), None);
         paint.set_anti_alias(true);
@@ -649,6 +652,7 @@ impl Element for ImageNode {
             canvas.restore();
         }
         draw_children(canvas);
+        Ok(())
     }
 
     fn animate_property(
@@ -836,7 +840,7 @@ impl Element for VideoNode {
         rect: Rect,
         parent_opacity: f32,
         draw_children: &mut dyn FnMut(&Canvas),
-    ) {
+    ) -> Result<(), RenderError> {
         let op = self.opacity.current_value * parent_opacity;
 
         let current = self.current_frame.lock().unwrap();
@@ -862,6 +866,7 @@ impl Element for VideoNode {
             canvas.draw_rect(rect, &p);
         }
         draw_children(canvas);
+        Ok(())
     }
 
     fn animate_property(
@@ -960,7 +965,7 @@ impl Element for CompositionNode {
         rect: Rect,
         opacity: f32,
         draw_children: &mut dyn FnMut(&Canvas),
-    ) {
+    ) -> Result<(), RenderError> {
         let d = self.internal_director.lock().unwrap();
 
         let width = d.width;
@@ -1013,7 +1018,7 @@ impl Element for CompositionNode {
             items.sort_by_key(|(_, item)| item.z_index);
 
             for (_, item) in items {
-                render_recursive(&d.scene, &d.assets, item.scene_root, c, 1.0);
+                render_recursive(&d.scene, &d.assets, item.scene_root, c, 1.0)?;
             }
 
             // Now draw surface to main canvas
@@ -1026,6 +1031,7 @@ impl Element for CompositionNode {
         }
 
         draw_children(canvas);
+        Ok(())
     }
 
     fn animate_property(

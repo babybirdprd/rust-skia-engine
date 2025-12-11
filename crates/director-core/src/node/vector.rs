@@ -59,13 +59,13 @@ impl Element for VectorNode {
         true
     }
 
-    fn render(&self, canvas: &Canvas, rect: Rect, parent_opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) {
+    fn render(&self, canvas: &Canvas, rect: Rect, parent_opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) -> Result<(), crate::RenderError> {
         let width = rect.width().ceil() as u32;
         let height = rect.height().ceil() as u32;
 
         if width == 0 || height == 0 {
             draw_children(canvas);
-            return;
+            return Ok(());
         }
 
         let mut cache_guard = self.cache.lock().unwrap();
@@ -113,6 +113,7 @@ impl Element for VectorNode {
         }
 
         draw_children(canvas);
+        Ok(())
     }
 
     fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str) {

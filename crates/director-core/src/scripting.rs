@@ -825,35 +825,31 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         }
     });
 
-    engine.register_fn("add_lottie", |parent: &mut NodeHandle, path: &str| {
+    engine.register_fn("add_lottie", |parent: &mut NodeHandle, path: &str| -> Result<NodeHandle, Box<rhai::EvalAltResult>> {
         let mut d = parent.director.lock().unwrap();
-        let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
+        // Propagate load error
+        let bytes = d.assets.loader.load_bytes(path).map_err(|e| e.to_string())?;
 
         match LottieNode::new(&bytes, HashMap::new(), &d.assets) {
             Ok(lottie_node) => {
                 let id = d.scene.add_node(Box::new(lottie_node));
                 d.scene.add_child(parent.id, id);
-                NodeHandle {
+                Ok(NodeHandle {
                     director: parent.director.clone(),
                     id,
-                }
+                })
             }
             Err(e) => {
-                eprintln!("Failed to load lottie: {}", e);
-                let id = d.scene.add_node(Box::new(BoxNode::new()));
-                NodeHandle {
-                    director: parent.director.clone(),
-                    id,
-                }
+                Err(format!("Failed to parse lottie: {}", e).into())
             }
         }
     });
 
     engine.register_fn(
         "add_lottie",
-        |parent: &mut NodeHandle, path: &str, props: rhai::Map| {
+        |parent: &mut NodeHandle, path: &str, props: rhai::Map| -> Result<NodeHandle, Box<rhai::EvalAltResult>> {
             let mut d = parent.director.lock().unwrap();
-            let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
+            let bytes = d.assets.loader.load_bytes(path).map_err(|e| e.to_string())?;
 
             let mut assets_map = HashMap::new();
             if let Some(assets_prop) = props
@@ -887,18 +883,13 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
                     let id = d.scene.add_node(Box::new(lottie_node));
                     d.scene.add_child(parent.id, id);
-                    NodeHandle {
+                    Ok(NodeHandle {
                         director: parent.director.clone(),
                         id,
-                    }
+                    })
                 }
                 Err(e) => {
-                    eprintln!("Failed to load lottie: {}", e);
-                    let id = d.scene.add_node(Box::new(BoxNode::new()));
-                    NodeHandle {
-                        director: parent.director.clone(),
-                        id,
-                    }
+                    Err(format!("Failed to parse lottie: {}", e).into())
                 }
             }
         },

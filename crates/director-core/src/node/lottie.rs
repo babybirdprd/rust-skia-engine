@@ -10,6 +10,7 @@ use lottie_skia::{SkiaRenderer, LottieContext};
 use crate::animation::{Animated, EasingType};
 use crate::systems::assets::AssetManager;
 use crate::AssetLoader;
+use crate::RenderError;
 
 /// Manages external assets (images, fonts) required by a Lottie animation.
 pub struct LottieAssetManager {
@@ -31,16 +32,14 @@ impl LottieContext for LottieAssetManager {
     fn load_typeface(&self, family: &str, style: &str) -> Option<skia_safe::Typeface> {
         // 1. Check shared typeface cache first (not implemented in this PR but good practice)
 
-        // 2. Try loading from disk
+        // 2. Try loading via AssetLoader (it handles paths/fallbacks now)
         let candidates = vec![
-            format!("assets/{}-{}.ttf", family, style),
-            format!("assets/{}.ttf", family),
             format!("{}-{}.ttf", family, style),
             format!("{}.ttf", family),
         ];
 
         for path in candidates {
-            if let Ok(bytes) = self.asset_loader.load_bytes(&path) {
+            if let Some(bytes) = self.load_bytes(&path) {
                  let data = Data::new_copy(&bytes);
                  return FontMgr::new().new_from_data(&data, 0);
             }
@@ -50,6 +49,10 @@ impl LottieContext for LottieAssetManager {
 
     fn load_image(&self, id: &str) -> Option<Image> {
         self.images.get(id).cloned()
+    }
+
+    fn load_bytes(&self, path: &str) -> Option<Vec<u8>> {
+        self.asset_loader.load_bytes(path).ok()
     }
 }
 
@@ -171,14 +174,14 @@ impl Element for LottieNode {
         true
     }
 
-    fn render(&self, canvas: &Canvas, rect: Rect, parent_opacity: f32, _draw_children: &mut dyn FnMut(&Canvas)) {
+    fn render(&self, canvas: &Canvas, rect: Rect, parent_opacity: f32, _draw_children: &mut dyn FnMut(&Canvas)) -> Result<(), RenderError> {
         let mut player = self.player.lock().unwrap();
         let current_frame = player.current_frame;
         let final_opacity = self.opacity.current_value * parent_opacity;
 
         // Skip rendering if fully transparent
         if final_opacity <= 0.0 {
-            return;
+            return Ok(());
         }
 
         // Determine integer dimensions for the cache
@@ -186,7 +189,7 @@ impl Element for LottieNode {
         let h = rect.height().ceil() as i32;
 
         if w <= 0 || h <= 0 {
-            return;
+            return Ok(());
         }
 
         let w_u32 = w as u32;
@@ -215,7 +218,7 @@ impl Element for LottieNode {
             // Try make_surface from canvas (GPU friendly)
             // Note: canvas.make_surface is not available in safe bindings directly or has different name.
             // Using raster fallback for now.
-            let mut surface = surfaces::raster(&image_info, None, None).expect("Failed to create raster surface");
+            let mut surface = surfaces::raster(&image_info, None, None).ok_or(RenderError::SurfaceFailure)?;
 
             // Clear surface
             surface.canvas().clear(Color::TRANSPARENT);
@@ -247,6 +250,7 @@ impl Element for LottieNode {
             sampling,
             &paint,
         );
+        Ok(())
     }
 
     fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str) {

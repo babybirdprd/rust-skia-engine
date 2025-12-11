@@ -50,9 +50,15 @@ fn main() {
             let mut director = movie.director.lock().unwrap();
             match render_export(&mut director, output_path, None, None) {
                 Ok(_) => println!("Render complete."),
-                Err(e) => println!("Render failed: {}", e),
+                Err(e) => {
+                    eprintln!("Render failed: {}", e);
+                    std::process::exit(1);
+                }
             }
         }
-        Err(e) => println!("Script Error: {}", e),
+        Err(e) => {
+            eprintln!("Script Error: {}", e);
+            std::process::exit(1);
+        }
     }
 }

@@ -17,6 +17,7 @@ use skia_safe::{
 pub trait LottieContext: Send + Sync {
     fn load_typeface(&self, family: &str, style: &str) -> Option<skia_safe::Typeface>;
     fn load_image(&self, id: &str) -> Option<skia_safe::Image>;
+    fn load_bytes(&self, path: &str) -> Option<Vec<u8>>;
 }
 
 // Default no-op implementation
@@ -25,6 +26,9 @@ impl LottieContext for () {
         None
     }
     fn load_image(&self, _id: &str) -> Option<skia_safe::Image> {
+        None
+    }
+    fn load_bytes(&self, _path: &str) -> Option<Vec<u8>> {
         None
     }
 }

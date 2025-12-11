@@ -370,7 +370,7 @@ impl Element for TextNode {
         rect: Rect,
         opacity: f32,
         draw_children: &mut dyn FnMut(&Canvas),
-    ) {
+    ) -> Result<(), crate::RenderError> {
         let mut p_guard = self.paragraph.lock().unwrap();
         if let Some(paragraph) = p_guard.as_mut() {
             paragraph.layout(rect.width());
@@ -407,6 +407,7 @@ impl Element for TextNode {
         }
 
         draw_children(canvas);
+        Ok(())
     }
 
     fn animate_property(

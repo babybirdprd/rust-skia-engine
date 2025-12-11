@@ -97,7 +97,7 @@ pub trait Element: std::fmt::Debug + ElementClone {
     /// * `layout_rect` - The computed layout box for this element.
     /// * `opacity` - The inherited opacity from parent nodes.
     /// * `draw_children` - A closure to trigger rendering of children nodes.
-    fn render(&self, canvas: &Canvas, layout_rect: Rect, opacity: f32, draw_children: &mut dyn FnMut(&Canvas));
+    fn render(&self, canvas: &Canvas, layout_rect: Rect, opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) -> Result<(), crate::RenderError>;
 
     /// Animates a specific named property.
     fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str);

@@ -52,9 +52,7 @@ fn build_node_recursive(director: &mut Director, node_def: &Node) -> NodeId {
         },
         NodeKind::Text { content, font_size } => {
             // TextNode needs access to the AssetManager's font system
-            let fs = director.assets.font_system.clone();
-            let sc = director.assets.swash_cache.clone();
-            let tc = director.assets.typeface_cache.clone();
+            let fc = director.assets.font_collection.clone();
 
             let span = TextSpan {
                 text: content.clone(),
@@ -63,7 +61,7 @@ fn build_node_recursive(director: &mut Director, node_def: &Node) -> NodeId {
                 ..Default::default()
             };
 
-            let t = TextNode::new(vec![span], fs, sc, tc);
+            let t = TextNode::new(vec![span], fc);
             Box::new(t)
         },
         NodeKind::Image { src } => {

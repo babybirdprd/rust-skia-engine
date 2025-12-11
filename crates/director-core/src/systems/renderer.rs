@@ -6,6 +6,7 @@ use crate::scene::SceneGraph;
 use crate::systems::assets::AssetManager;
 use crate::systems::layout::LayoutEngine;
 use crate::audio::load_audio_bytes;
+use crate::errors::RenderError;
 use skia_safe::{ColorType, AlphaType, ColorSpace, RuntimeEffect, Data, runtime_effect::ChildPtr};
 use crate::video_wrapper::{Encoder, EncoderSettings, Locator, Time};
 use ndarray::Array3;
@@ -90,10 +91,10 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
 
     let mut surface = surface.or_else(|| {
         skia_safe::surfaces::raster(&info, None, None)
-    }).expect("Failed to create Skia surface");
+    }).ok_or(RenderError::SurfaceFailure)?;
 
     let mut accumulation_surface = if director.samples_per_frame > 1 {
-        Some(surface.new_surface(&info).expect("Failed to create accumulation surface"))
+        Some(surface.new_surface(&info).ok_or(RenderError::SurfaceFailure)?)
     } else {
         None
     };
@@ -113,7 +114,7 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
         let frame_start_time = i as f64 / fps as f64;
         let shutter_start_time = frame_start_time - (shutter_duration / 2.0);
 
-        let render_at_time = |director: &mut Director, layout_engine: &mut LayoutEngine, time: f64, canvas: &skia_safe::Canvas| {
+        let mut render_at_time = |director: &mut Director, layout_engine: &mut LayoutEngine, time: f64, canvas: &skia_safe::Canvas| -> Result<(), RenderError> {
              director.update(time);
              layout_engine.compute_layout(&mut director.scene, director.width, director.height, time);
              director.run_post_layout(time);
@@ -147,8 +148,8 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
                              if let (Some(mut surf_a), Some(mut surf_b)) = (skia_safe::surfaces::raster(&info, None, None), skia_safe::surfaces::raster(&info, None, None)) {
                                  // Render A & B
                                  if let (Some(item_a), Some(item_b)) = (director.timeline.get(trans.from_scene_idx), director.timeline.get(trans.to_scene_idx)) {
-                                     render_recursive(&director.scene, assets_ref, item_a.scene_root, surf_a.canvas(), 1.0);
-                                     render_recursive(&director.scene, assets_ref, item_b.scene_root, surf_b.canvas(), 1.0);
+                                     render_recursive(&director.scene, assets_ref, item_a.scene_root, surf_a.canvas(), 1.0)?;
+                                     render_recursive(&director.scene, assets_ref, item_b.scene_root, surf_b.canvas(), 1.0)?;
 
                                      let img_a = surf_a.image_snapshot();
                                      let img_b = surf_b.image_snapshot();
@@ -162,19 +163,20 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
                              drawn_transition = true;
                          }
                      } else {
-                         render_recursive(&director.scene, assets_ref, item.scene_root, canvas, 1.0);
+                         render_recursive(&director.scene, assets_ref, item.scene_root, canvas, 1.0)?;
                      }
                  }
              } else {
                  for (_, item) in items {
-                     render_recursive(&director.scene, assets_ref, item.scene_root, canvas, 1.0);
+                     render_recursive(&director.scene, assets_ref, item.scene_root, canvas, 1.0)?;
                  }
              }
              if time < 0.1 { eprintln!("[Frame] render complete"); }
+             Ok(())
         };
 
         if samples == 1 {
-            render_at_time(director, &mut layout_engine, frame_start_time, surface.canvas());
+            render_at_time(director, &mut layout_engine, frame_start_time, surface.canvas())?;
         } else {
              let scratch_surface = accumulation_surface.as_mut().unwrap();
 
@@ -187,7 +189,7 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
                  let sample_time = shutter_start_time + t_offset;
 
                  // Clear handled by render_at_time
-                 render_at_time(director, &mut layout_engine, sample_time, scratch_surface.canvas());
+                 render_at_time(director, &mut layout_engine, sample_time, scratch_surface.canvas())?;
 
                  let weight = 1.0 / (s as f32 + 1.0);
                  let mut paint = skia_safe::Paint::default();
@@ -245,7 +247,7 @@ pub fn render_recursive(
     node_id: NodeId,
     canvas: &skia_safe::Canvas,
     parent_opacity: f32
-) {
+) -> Result<(), RenderError> {
     if let Some(node) = scene.get_node(node_id) {
          canvas.save();
 
@@ -289,16 +291,30 @@ pub fn render_recursive(
 
          let local_rect = skia_safe::Rect::from_wh(node.layout_rect.width(), node.layout_rect.height());
 
+         let mut last_error = Ok(());
          let mut draw_children = |canvas: &skia_safe::Canvas| {
              for child_id in &node.children {
-                 render_recursive(scene, assets, *child_id, canvas, parent_opacity);
+                 if let Err(e) = render_recursive(scene, assets, *child_id, canvas, parent_opacity) {
+                     last_error = Err(e);
+                     // We continue to try drawing other children?
+                     // Or break? Let's break for fail-fast.
+                     // But this is a closure used by element.render.
+                     // If we want to propagate, we need to signal it.
+                     // However, the signature of draw_children is fixed by the Element trait: `FnMut(&Canvas)`.
+                     // The Element trait's `render` method now returns Result, but `draw_children` closure does not.
+                     // We should probably change `draw_children` signature in Element trait too if we want full propagation,
+                     // OR we rely on `last_error` capturing it.
+                     // Since `draw_children` is mutable, we can capture `last_error` by mutable ref if we define it outside.
+                     // Wait, `draw_children` is passed to `node.element.render`.
+                     // We need to check `last_error` after `render`.
+                 }
              }
          };
 
          // Check if we need a save layer for blending or masking
          let need_layer = node.mask_node.is_some() || node.blend_mode != skia_safe::BlendMode::SrcOver;
 
-         if need_layer {
+         let result = if need_layer {
              let mut paint = skia_safe::Paint::default();
              paint.set_blend_mode(node.blend_mode);
 
@@ -307,25 +323,34 @@ pub fn render_recursive(
              // This layer acts as the composition group.
              canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&paint));
 
-             node.element.render(canvas, local_rect, parent_opacity, &mut draw_children);
+             let r = node.element.render(canvas, local_rect, parent_opacity, &mut draw_children);
 
-             if let Some(mask_id) = node.mask_node {
-                 let mut mask_paint = skia_safe::Paint::default();
-                 mask_paint.set_blend_mode(skia_safe::BlendMode::DstIn);
+             if r.is_ok() && last_error.is_ok() {
+                 if let Some(mask_id) = node.mask_node {
+                     let mut mask_paint = skia_safe::Paint::default();
+                     mask_paint.set_blend_mode(skia_safe::BlendMode::DstIn);
 
-                 // Create a layer for the mask, which will composite onto the content with DstIn
-                 canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&mask_paint));
-                 render_recursive(scene, assets, mask_id, canvas, 1.0);
-                 canvas.restore();
+                     // Create a layer for the mask, which will composite onto the content with DstIn
+                     canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&mask_paint));
+                     if let Err(e) = render_recursive(scene, assets, mask_id, canvas, 1.0) {
+                         last_error = Err(e);
+                     }
+                     canvas.restore();
+                 }
              }
 
              canvas.restore();
+             r
          } else {
-             node.element.render(canvas, local_rect, parent_opacity, &mut draw_children);
-         }
+             node.element.render(canvas, local_rect, parent_opacity, &mut draw_children)
+         };
 
          canvas.restore();
+
+         result?;
+         last_error?;
     }
+    Ok(())
 }
 
 fn get_transition_shader(kind: &TransitionType) -> &'static str {
@@ -461,7 +486,7 @@ fn draw_transition(
 /// Renders a single frame at a specific timestamp to the provided canvas.
 ///
 /// This is helpful for debugging or generating static previews without running the full export loop.
-pub fn render_frame(director: &mut Director, time: f64, canvas: &skia_safe::Canvas) {
+pub fn render_frame(director: &mut Director, time: f64, canvas: &skia_safe::Canvas) -> Result<(), RenderError> {
      let mut layout_engine = LayoutEngine::new();
      director.update(time);
      layout_engine.compute_layout(&mut director.scene, director.width, director.height, time);
@@ -477,6 +502,7 @@ pub fn render_frame(director: &mut Director, time: f64, canvas: &skia_safe::Canv
      items.sort_by_key(|(_, item)| item.z_index);
 
      for (_, item) in items {
-         render_recursive(&director.scene, assets, item.scene_root, canvas, 1.0);
+         render_recursive(&director.scene, assets, item.scene_root, canvas, 1.0)?;
      }
+     Ok(())
 }

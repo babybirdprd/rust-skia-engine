@@ -67,9 +67,11 @@ pub mod types;
 
 /// Core systems (Asset Management, etc.).
 pub mod systems;
+pub mod errors;
 
 pub use director::Director;
 pub use element::Element;
+pub use errors::RenderError;
 
 use anyhow::Result;
 
@@ -99,7 +101,12 @@ pub struct DefaultAssetLoader;
 impl AssetLoader for DefaultAssetLoader {
     /// Loads bytes directly from the local filesystem.
     fn load_bytes(&self, path: &str) -> Result<Vec<u8>> {
-        Ok(std::fs::read(path)?)
+        if let Ok(bytes) = std::fs::read(path) {
+            return Ok(bytes);
+        }
+        // Fallback to assets/
+        let alt = format!("assets/{}", path);
+        std::fs::read(&alt).map_err(|e| anyhow::anyhow!("Asset not found: {} (checked '{}' and '{}'): {}", path, path, alt, e))
     }
 
     /// Attempts to load an emoji font.
