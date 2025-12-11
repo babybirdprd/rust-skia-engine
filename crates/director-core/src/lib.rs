@@ -74,6 +74,7 @@ pub use element::Element;
 pub use errors::RenderError;
 
 use anyhow::Result;
+use tracing::instrument;
 
 /// A trait for abstracting file system access.
 ///
@@ -100,6 +101,7 @@ pub struct DefaultAssetLoader;
 
 impl AssetLoader for DefaultAssetLoader {
     /// Loads bytes directly from the local filesystem.
+    #[instrument(level = "debug", skip(self), fields(path = path))]
     fn load_bytes(&self, path: &str) -> Result<Vec<u8>> {
         if let Ok(bytes) = std::fs::read(path) {
             return Ok(bytes);

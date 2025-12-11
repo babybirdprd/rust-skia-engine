@@ -1,42 +1,103 @@
-use director_core::systems::renderer::render_export;
+use clap::{Parser, ValueEnum};
 use director_core::scripting::register_rhai_api;
+use director_core::systems::renderer::render_export;
 use director_core::DefaultAssetLoader;
 use rhai::Engine;
-use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tracing::{error, info};
+use tracing_subscriber::{fmt, EnvFilter};
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// Path to the Rhai script
+    #[arg(value_name = "SCRIPT")]
+    script: PathBuf,
+
+    /// Output video path
+    #[arg(value_name = "OUTPUT")]
+    output: Option<PathBuf>,
+
+    /// Log level
+    #[arg(long, value_enum, default_value_t = LogLevel::Info)]
+    log_level: LogLevel,
+
+    /// Log format
+    #[arg(long, value_enum, default_value_t = LogFormat::Pretty)]
+    log_format: LogFormat,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
+enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+impl std::fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LogLevel::Error => write!(f, "error"),
+            LogLevel::Warn => write!(f, "warn"),
+            LogLevel::Info => write!(f, "info"),
+            LogLevel::Debug => write!(f, "debug"),
+            LogLevel::Trace => write!(f, "trace"),
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
+enum LogFormat {
+    Pretty,
+    Json,
+}
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let cli = Cli::parse();
 
-    if args.len() < 2 {
-        println!("Usage: director-engine <script.rhai> [output.mp4]");
-        return;
+    // Initialize Logging
+    let filter = EnvFilter::builder()
+        .with_default_directive(cli.log_level.to_string().parse().unwrap())
+        .from_env_lossy();
+
+    let subscriber_builder = fmt::Subscriber::builder()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .with_target(false); // Clean output for humans (default)
+
+    match cli.log_format {
+        LogFormat::Json => {
+            // For JSON, we might want target included, but user said strict NDJSON.
+            // subscriber.json() enables JSON formatting.
+            // We need to finish building.
+            subscriber_builder.json().init();
+        }
+        LogFormat::Pretty => {
+            subscriber_builder.pretty().init();
+        }
     }
 
-    let script_path = PathBuf::from(&args[1]);
-    let output_path = if args.len() >= 3 {
-        PathBuf::from(&args[2])
+    let script_path = cli.script;
+    let output_path = if let Some(out) = cli.output {
+        out
     } else {
         let mut p = script_path.clone();
         p.set_extension("mp4");
-        // If script was examples/showcase.rhai, output is examples/showcase.mp4
-        // To keep repo clean, maybe default to root?
-        // But following standard behavior (ffmpeg etc), same dir is expected.
-        // I will force it to be in the current directory if not specified to avoid cluttering examples?
-        // No, let's just default to replacing extension.
         p
     };
 
-    println!("Initializing Director Engine...");
-    println!("Script: {:?}", script_path);
-    println!("Output: {:?}", output_path);
+    info!("Initializing Director Engine...");
+    info!("Script: {:?}", script_path);
+    info!("Output: {:?}", output_path);
 
     let script = match fs::read_to_string(&script_path) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Error reading script file: {}", e);
+            error!("Error reading script file: {}", e);
             return;
         }
     };
@@ -46,18 +107,18 @@ fn main() {
 
     match engine.eval::<director_core::scripting::MovieHandle>(&script) {
         Ok(movie) => {
-            println!("Script evaluated successfully. Starting render...");
+            info!("Script evaluated successfully. Starting render...");
             let mut director = movie.director.lock().unwrap();
             match render_export(&mut director, output_path, None, None) {
-                Ok(_) => println!("Render complete."),
+                Ok(_) => info!("Render complete."),
                 Err(e) => {
-                    eprintln!("Render failed: {}", e);
+                    error!("Render failed: {}", e);
                     std::process::exit(1);
                 }
             }
         }
         Err(e) => {
-            eprintln!("Script Error: {}", e);
+            error!("Script Error: {}", e);
             std::process::exit(1);
         }
     }

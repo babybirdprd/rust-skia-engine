@@ -4,6 +4,7 @@ use taffy::geometry::Size;
 use taffy::style::AvailableSpace;
 use std::any::Any;
 use crate::types::{Color, GradientConfig};
+use tracing::warn;
 
 /// Represents a span of text with specific styling properties.
 ///
@@ -105,7 +106,6 @@ pub trait Element: std::fmt::Debug + ElementClone {
     /// Animates a property using physics-based spring dynamics.
     fn animate_property_spring(&mut self, _property: &str, _start: Option<f32>, _target: f32, _config: crate::animation::SpringConfig) {
         // Default: No-op or Warn
-        // eprintln!("Warning: Spring animation not supported for this property or element.");
     }
 
     /// Replaces the content with a list of rich text spans.
@@ -128,7 +128,7 @@ pub trait Element: std::fmt::Debug + ElementClone {
         _easing: &str
     ) {
         // Default implementation: Warn user
-        eprintln!("Warning: add_animator called on a non-text node.");
+        warn!("add_animator called on a non-text node.");
     }
 
     /// Returns audio samples if this element contains audio (e.g., Video or Composition).

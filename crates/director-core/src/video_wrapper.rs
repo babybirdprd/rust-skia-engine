@@ -121,7 +121,7 @@ mod real {
             // Log which encoder we're using
             let codec_v = codec::encoder::find(codec::Id::H264)
                 .ok_or(anyhow::anyhow!("H264 not found"))?;
-            eprintln!("[Encoder] Using codec: H264 (software)");
+            tracing::info!("[Encoder] Using codec: H264 (software)");
             
             let mut v_encoder = codec::context::Context::new_with_codec(codec_v)
                 .encoder()

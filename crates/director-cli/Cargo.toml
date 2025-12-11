@@ -6,8 +6,11 @@ description = "CLI for the Director rendering engine"
 license = "MIT"
 
 [dependencies]
+clap = { version = "4.5.53", features = ["derive"] }
 director-core = { path = "../director-core" }
 rhai = "1.23.6"
+tracing = "0.1.43"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
 
 [[bin]]
 name = "director-engine"

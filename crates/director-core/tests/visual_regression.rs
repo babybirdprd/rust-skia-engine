@@ -105,6 +105,11 @@ pub fn assert_frame_match(director: &mut Director, time: f64, snapshot_name: &st
 
 #[test]
 fn test_visual_basic_box() {
+    let _ = tracing_subscriber::fmt()
+        .with_test_writer()
+        .with_max_level(tracing::Level::DEBUG)
+        .try_init();
+
     let width = 200;
     let height = 200;
     let fps = 30; // u32

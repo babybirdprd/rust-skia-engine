@@ -21,6 +21,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use taffy::style::{AlignItems, FlexDirection, JustifyContent, Style};
 use tempfile::NamedTempFile;
+use tracing::error;
 
 // Video imports
 use crate::video_wrapper::{VideoLoader, RenderMode, VideoResponse};
@@ -208,7 +209,7 @@ fn build_effect_filter(
                                 cache.insert(sksl.clone(), effect);
                             }
                             Err(e) => {
-                                eprintln!("Shader compilation error: {}", e);
+                                error!("Shader compilation error: {}", e);
                                 continue;
                             }
                         }
@@ -750,7 +751,7 @@ impl VideoNode {
         let loader = match VideoLoader::new(path.clone(), mode) {
             Ok(l) => Some(l),
             Err(e) => {
-                eprintln!("Failed to create VideoLoader for {:?}: {}", path, e);
+                error!("Failed to create VideoLoader for {:?}: {}", path, e);
                 None
             }
         };
@@ -832,7 +833,7 @@ impl Element for VideoNode {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Sync Video Error: {}", e);
+                        error!("Sync Video Error: {}", e);
                     }
                 },
             }

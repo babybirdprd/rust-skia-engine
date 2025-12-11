@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use skia_safe::{Data, FontMgr};
 use skia_safe::textlayout::{FontCollection, TypefaceFontProvider};
+use tracing::instrument;
 
 /// Shared resources context that can be passed between Directors (e.g. for sub-compositions).
 #[derive(Clone)]
@@ -220,6 +221,7 @@ impl Director {
     ///
     /// This method calculates local time for each node, updates animations (transform, path),
     /// and calls `update()` on the underlying Elements.
+    #[instrument(level = "debug", skip(self), fields(time = global_time))]
     pub fn update(&mut self, global_time: f64) {
         // Pass 1: Mark active nodes and set local time
         let mut active_roots = Vec::new();
