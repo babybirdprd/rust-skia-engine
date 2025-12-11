@@ -293,20 +293,18 @@ pub fn render_recursive(
 
          let mut last_error = Ok(());
          let mut draw_children = |canvas: &skia_safe::Canvas| {
-             for child_id in &node.children {
-                 if let Err(e) = render_recursive(scene, assets, *child_id, canvas, parent_opacity) {
+             // Z-Index Sorting
+             let mut sorted_children: Vec<(NodeId, i32)> = Vec::with_capacity(node.children.len());
+             for &child_id in &node.children {
+                 if let Some(child) = scene.get_node(child_id) {
+                     sorted_children.push((child_id, child.z_index));
+                 }
+             }
+             sorted_children.sort_by_key(|k| k.1);
+
+             for (child_id, _) in sorted_children {
+                 if let Err(e) = render_recursive(scene, assets, child_id, canvas, parent_opacity) {
                      last_error = Err(e);
-                     // We continue to try drawing other children?
-                     // Or break? Let's break for fail-fast.
-                     // But this is a closure used by element.render.
-                     // If we want to propagate, we need to signal it.
-                     // However, the signature of draw_children is fixed by the Element trait: `FnMut(&Canvas)`.
-                     // The Element trait's `render` method now returns Result, but `draw_children` closure does not.
-                     // We should probably change `draw_children` signature in Element trait too if we want full propagation,
-                     // OR we rely on `last_error` capturing it.
-                     // Since `draw_children` is mutable, we can capture `last_error` by mutable ref if we define it outside.
-                     // Wait, `draw_children` is passed to `node.element.render`.
-                     // We need to check `last_error` after `render`.
                  }
              }
          };

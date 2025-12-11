@@ -746,6 +746,11 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         parse_layout_style(&props, &mut box_node.style);
 
         let id = d.scene.add_node(Box::new(box_node));
+        if let Some(z) = props.get("z_index").and_then(|v| v.as_int().ok()) {
+            if let Some(n) = d.scene.get_node_mut(id) {
+                n.z_index = z as i32;
+            }
+        }
         d.scene.add_child(parent.id, id);
 
         NodeHandle {
@@ -804,6 +809,11 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         parse_layout_style(&props, &mut box_node.style);
 
         let id = d.scene.add_node(Box::new(box_node));
+        if let Some(z) = props.get("z_index").and_then(|v| v.as_int().ok()) {
+            if let Some(n) = d.scene.get_node_mut(id) {
+                n.z_index = z as i32;
+            }
+        }
         d.scene.add_child(scene.root_id, id);
 
         NodeHandle {
@@ -882,6 +892,11 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
                     }
 
                     let id = d.scene.add_node(Box::new(lottie_node));
+                    if let Some(z) = props.get("z_index").and_then(|v| v.as_int().ok()) {
+                        if let Some(n) = d.scene.get_node_mut(id) {
+                            n.z_index = z as i32;
+                        }
+                    }
                     d.scene.add_child(parent.id, id);
                     Ok(NodeHandle {
                         director: parent.director.clone(),
@@ -918,6 +933,11 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
             parse_layout_style(&props, &mut vec_node.style);
 
             let id = d.scene.add_node(Box::new(vec_node));
+            if let Some(z) = props.get("z_index").and_then(|v| v.as_int().ok()) {
+                if let Some(n) = d.scene.get_node_mut(id) {
+                    n.z_index = z as i32;
+                }
+            }
             d.scene.add_child(scene.root_id, id);
             NodeHandle {
                 director: scene.director.clone(),
@@ -945,6 +965,11 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
             }
 
             let id = d.scene.add_node(Box::new(img_node));
+            if let Some(z) = props.get("z_index").and_then(|v| v.as_int().ok()) {
+                if let Some(n) = d.scene.get_node_mut(id) {
+                    n.z_index = z as i32;
+                }
+            }
             d.scene.add_child(parent.id, id);
             NodeHandle {
                 director: parent.director.clone(),
@@ -976,6 +1001,11 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
             parse_layout_style(&props, &mut vec_node.style);
 
             let id = d.scene.add_node(Box::new(vec_node));
+            if let Some(z) = props.get("z_index").and_then(|v| v.as_int().ok()) {
+                if let Some(n) = d.scene.get_node_mut(id) {
+                    n.z_index = z as i32;
+                }
+            }
             d.scene.add_child(parent.id, id);
             NodeHandle {
                 director: parent.director.clone(),
@@ -1032,6 +1062,11 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
             }
 
             let id = d.scene.add_node(Box::new(vid_node));
+            if let Some(z) = props.get("z_index").and_then(|v| v.as_int().ok()) {
+                if let Some(n) = d.scene.get_node_mut(id) {
+                    n.z_index = z as i32;
+                }
+            }
             d.scene.add_child(parent.id, id);
             NodeHandle {
                 director: parent.director.clone(),
@@ -1131,6 +1166,11 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         }
 
         let id = d.scene.add_node(Box::new(text_node));
+        if let Some(z) = props.get("z_index").and_then(|v| v.as_int().ok()) {
+            if let Some(n) = d.scene.get_node_mut(id) {
+                n.z_index = z as i32;
+            }
+        }
         d.scene.add_child(parent.id, id);
 
         NodeHandle {
@@ -1226,6 +1266,11 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         }
 
         let id = d.scene.add_node(Box::new(text_node));
+        if let Some(z) = props.get("z_index").and_then(|v| v.as_int().ok()) {
+            if let Some(n) = d.scene.get_node_mut(id) {
+                n.z_index = z as i32;
+            }
+        }
         d.scene.add_child(scene.root_id, id);
 
         NodeHandle {
@@ -1367,6 +1412,13 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         if let Some(n) = d.scene.get_node_mut(node.id) {
             n.transform.pivot_x = x as f32;
             n.transform.pivot_y = y as f32;
+        }
+    });
+
+    engine.register_fn("set_z_index", |node: &mut NodeHandle, z: i64| {
+        let mut d = node.director.lock().unwrap();
+        if let Some(n) = d.scene.get_node_mut(node.id) {
+            n.z_index = z as i32;
         }
     });
 

@@ -28,6 +28,11 @@ pub struct SceneNode {
     pub mask_node: Option<NodeId>,
     pub blend_mode: skia_safe::BlendMode,
 
+    /// Explicit render order z-index (default: 0).
+    /// Higher values render on top of lower values.
+    /// Sorting is local to the parent's children list.
+    pub z_index: i32,
+
     pub dirty_style: bool,
 }
 
@@ -45,6 +50,7 @@ impl SceneNode {
             transform: Transform::new(),
             mask_node: None,
             blend_mode: skia_safe::BlendMode::SrcOver,
+            z_index: 0,
             dirty_style: true,
         }
     }
