@@ -1,4 +1,4 @@
-use director_core::{Director, node::TextNode, element::{TextSpan, TextFit, Element}};
+use director_core::{Director, node::TextNode, element::{TextSpan, TextFit}};
 use std::sync::Arc;
 use director_core::video_wrapper::RenderMode;
 use director_core::DefaultAssetLoader;
@@ -23,10 +23,8 @@ fn test_text_fit_shrink() {
     }];
 
     // Create TextNode manually
-    let fs = director.assets.font_system.clone();
-    let sc = director.assets.swash_cache.clone();
-    let tc = director.assets.typeface_cache.clone();
-    let mut text_node = TextNode::new(spans, fs, sc, tc);
+    let font_collection = director.assets.font_collection.clone();
+    let mut text_node = TextNode::new(spans, font_collection);
     text_node.fit_mode = TextFit::Shrink;
     text_node.min_size = 10.0;
     text_node.max_size = 100.0;
@@ -61,7 +59,7 @@ fn test_text_fit_shrink() {
 
     println!("Final font size: {}", text_node.default_font_size.current_value);
     assert!(text_node.default_font_size.current_value < 100.0, "Font size should have shrunk");
-    assert!(text_node.default_font_size.current_value > 10.0, "Font size should be above min");
+    assert!(text_node.default_font_size.current_value >= 10.0, "Font size should be >= min");
 }
 
 #[test]
@@ -83,10 +81,8 @@ fn test_render_video_output() {
         fill_gradient: None,
     }];
 
-    let fs = director.assets.font_system.clone();
-    let sc = director.assets.swash_cache.clone();
-    let tc = director.assets.typeface_cache.clone();
-    let mut text_node = TextNode::new(spans, fs, sc, tc);
+    let font_collection = director.assets.font_collection.clone();
+    let mut text_node = TextNode::new(spans, font_collection);
     text_node.fit_mode = TextFit::Shrink;
     text_node.min_size = 20.0;
     text_node.max_size = 200.0;

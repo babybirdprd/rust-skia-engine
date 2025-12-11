@@ -6,8 +6,8 @@
 print("🎬 GENESIS - Cinematic Showcase Initializing...");
 
 // === CONFIGURATION ===
-let width = 1920;
-let height = 1080;
+let width = 854;
+let height = 480;
 let fps = 30;
 
 let movie = new_director(width, height, fps, #{ mode: "export" });
@@ -323,7 +323,7 @@ let chroma_shader = `
         float offset = intensity * 15.0;
         
         // RGB split based on distance from center
-        float2 center = float2(960.0, 540.0);
+        float2 center = float2(427.0, 240.0);
         float2 dir = normalize(coord - center);
         
         half4 color;

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use skia_safe::RuntimeEffect;
-use cosmic_text::{FontSystem, SwashCache};
+use skia_safe::textlayout::{FontCollection, TypefaceFontProvider};
 use crate::AssetLoader;
 
 /// Manages heavy shared resources (Fonts, Shaders, Asset Loading).
@@ -15,29 +15,25 @@ pub struct AssetManager {
     pub loader: Arc<dyn AssetLoader>,
     /// Global shader cache.
     pub shader_cache: Arc<Mutex<HashMap<String, RuntimeEffect>>>,
-    /// Shared Font System.
-    pub font_system: Arc<Mutex<FontSystem>>,
-    /// Shared Swash Cache.
-    pub swash_cache: Arc<Mutex<SwashCache>>,
-    /// Shared Typeface Cache.
-    pub typeface_cache: Arc<Mutex<HashMap<cosmic_text::fontdb::ID, skia_safe::Typeface>>>,
+    /// Shared Font Collection (Skia).
+    pub font_collection: Arc<Mutex<FontCollection>>,
+    /// Shared Font Provider (Skia).
+    pub font_provider: Arc<Mutex<TypefaceFontProvider>>,
 }
 
 impl AssetManager {
     /// Creates a new `AssetManager`.
     pub fn new(
         loader: Arc<dyn AssetLoader>,
-        font_system: Arc<Mutex<FontSystem>>,
-        swash_cache: Arc<Mutex<SwashCache>>,
+        font_collection: Arc<Mutex<FontCollection>>,
+        font_provider: Arc<Mutex<TypefaceFontProvider>>,
         shader_cache: Arc<Mutex<HashMap<String, RuntimeEffect>>>,
-        typeface_cache: Arc<Mutex<HashMap<cosmic_text::fontdb::ID, skia_safe::Typeface>>>,
     ) -> Self {
         Self {
             loader,
             shader_cache,
-            font_system,
-            swash_cache,
-            typeface_cache,
+            font_collection,
+            font_provider,
         }
     }
 }

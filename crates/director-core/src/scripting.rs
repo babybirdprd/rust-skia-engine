@@ -76,7 +76,7 @@ fn extract_outer_style(source: &Style) -> Style {
 fn apply_effect_to_node(d: &mut Director, node_id: NodeId, effect: EffectType) -> NodeId {
     let parent_id_opt = d.scene.get_node(node_id).and_then(|n| n.parent);
 
-    let mut wrapper_style = Style::default();
+    let wrapper_style;
 
     // Modify target node style (Steal & Fill)
     if let Some(node) = d.scene.get_node_mut(node_id) {
@@ -1051,9 +1051,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
     engine.register_fn("add_text", |parent: &mut NodeHandle, props: rhai::Map| {
         let mut d = parent.director.lock().unwrap();
-        let fs = d.assets.font_system.clone();
-        let sc = d.assets.swash_cache.clone();
-        let tc = d.assets.typeface_cache.clone();
+        let font_collection = d.assets.font_collection.clone();
 
         let spans = if let Some(c) = props.get("content") {
             parse_spans_from_dynamic(c.clone())
@@ -1061,7 +1059,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
             Vec::new()
         };
 
-        let mut text_node = TextNode::new(spans, fs, sc, tc);
+        let mut text_node = TextNode::new(spans, font_collection);
 
         // Helper to apply properties to TextNode and Spans
         if let Some(s) = props.get("size").and_then(|v| v.as_float().ok()) {
@@ -1086,12 +1084,10 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
             if span.font_weight.is_none() {
                 span.font_weight = weight;
             }
-            // Only apply size/color to spans if we want them to override node defaults strictly?
-            // Logic in render uses span.unwrap_or(node.default). So leaving span as None is fine.
         }
 
-        // Re-init buffer to reflect changes (especially size/weight affecting layout)
-        text_node.init_buffer();
+        // Re-init paragraph to reflect changes
+        text_node.init_paragraph();
 
         parse_layout_style(&props, &mut text_node.style);
 
@@ -1154,9 +1150,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
 
     engine.register_fn("add_text", |scene: &mut SceneHandle, props: rhai::Map| {
         let mut d = scene.director.lock().unwrap();
-        let fs = d.assets.font_system.clone();
-        let sc = d.assets.swash_cache.clone();
-        let tc = d.assets.typeface_cache.clone();
+        let font_collection = d.assets.font_collection.clone();
 
         let spans = if let Some(c) = props.get("content") {
             parse_spans_from_dynamic(c.clone())
@@ -1164,7 +1158,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
             Vec::new()
         };
 
-        let mut text_node = TextNode::new(spans, fs, sc, tc);
+        let mut text_node = TextNode::new(spans, font_collection);
 
         if let Some(s) = props.get("size").and_then(|v| v.as_float().ok()) {
             text_node.default_font_size = crate::animation::Animated::new(s as f32);
@@ -1188,7 +1182,7 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
             }
         }
 
-        text_node.init_buffer();
+        text_node.init_paragraph();
 
         parse_layout_style(&props, &mut text_node.style);
 

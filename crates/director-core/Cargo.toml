@@ -9,10 +9,9 @@ keywords = ["graphics", "skia", "rendering", "video"]
 categories = ["rendering", "multimedia::video"]
 
 [dependencies]
-skia-safe = "0.90.0"
+skia-safe = { version = "0.90.0", features = ["textlayout"] }
 taffy = "0.9.2"
 keyframe = "1.1.1"
-cosmic-text = "0.15.0"
 rhai = "1.23.6"
 anyhow = "1.0.100"
 thiserror = "2.0.17"

@@ -8,7 +8,6 @@ use director_core::systems::renderer::render_export;
 use rhai::Engine;
 use std::sync::Arc;
 use std::fs;
-use std::path::PathBuf;
 
 #[test]
 fn test_cinematic_showcase() {

@@ -188,7 +188,6 @@ pub fn resample_audio(samples: &[f32], source_rate: u32, target_rate: u32) -> Re
 
         // Pad if last chunk is smaller than required input size
         if len < input_chunk_size {
-             let padding = input_chunk_size - len;
              input_batch[0].resize(input_chunk_size, 0.0);
              input_batch[1].resize(input_chunk_size, 0.0);
         }

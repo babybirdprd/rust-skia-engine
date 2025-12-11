@@ -1,7 +1,6 @@
 use skia_safe::{Path, Color4f};
 use crate::animation::Animated;
 use keyframe::CanTween;
-use keyframe::num_traits::Float;
 use serde::{Serialize, Deserialize};
 
 /// Specifies how the content of a replaceable element (img, video) should

@@ -1,4 +1,4 @@
-use skia_safe::{Canvas, Rect, Color4f};
+use skia_safe::{Canvas, Rect};
 use taffy::style::Style;
 use taffy::geometry::Size;
 use taffy::style::AvailableSpace;

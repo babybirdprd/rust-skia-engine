@@ -9,7 +9,8 @@ use crate::systems::assets::AssetManager;
 use crate::scene::SceneGraph;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
-use cosmic_text::{FontSystem, SwashCache, fontdb::Source};
+use skia_safe::{Data, FontMgr};
+use skia_safe::textlayout::{FontCollection, TypefaceFontProvider};
 
 /// Shared resources context that can be passed between Directors (e.g. for sub-compositions).
 #[derive(Clone)]
@@ -99,17 +100,29 @@ impl Director {
         let assets = if let Some(ctx) = context {
             ctx.assets
         } else {
-            let mut font_system = FontSystem::new();
-            // Load fallback font if available
+            let mut font_collection = FontCollection::new();
+            let mut font_provider = TypefaceFontProvider::new();
+
+            // Load system fonts fallback
+            font_collection.set_default_font_manager(FontMgr::default(), None);
+
+            // Load fallback font (e.g. Emoji) if available
             if let Some(bytes) = asset_loader.load_font_fallback() {
-                 let db = font_system.db_mut();
-                 db.load_font_source(Source::Binary(Arc::new(bytes)));
+                 let data = Data::new_copy(&bytes);
+                 // We need to register the typeface with an alias if possible,
+                 // or just register it. TypefaceFontProvider::register_typeface returns usize.
+                 if let Some(typeface) = FontMgr::new().new_from_data(&data, 0) {
+                     font_provider.register_typeface(typeface, Some("Fallback"));
+                 }
             }
+
+            // Connect provider to collection
+            font_collection.set_asset_font_manager(Some(font_provider.clone().into()));
+
             AssetManager::new(
                 asset_loader,
-                Arc::new(Mutex::new(font_system)),
-                Arc::new(Mutex::new(SwashCache::new())),
-                Arc::new(Mutex::new(HashMap::new())),
+                Arc::new(Mutex::new(font_collection)),
+                Arc::new(Mutex::new(font_provider)),
                 Arc::new(Mutex::new(HashMap::new())),
             )
         };
