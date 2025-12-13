@@ -1,6 +1,0 @@
-Node[0] (Children: [1, 4, 5]) - Rect(x:0.0, y:0.0, w:1000.0, h:1000.0) Z: 0
-  Node[1] (Children: [2, 3]) - Rect(x:0.0, y:350.0, w:1000.0, h:200.0) Z: 0
-    Node[2] (Children: []) - Rect(x:0.0, y:75.0, w:50.0, h:50.0) Z: 0
-    Node[3] (Children: []) - Rect(x:950.0, y:75.0, w:50.0, h:50.0) Z: 0
-  Node[4] (Children: []) - Rect(x:890.0, y:890.0, w:100.0, h:100.0) Z: 0
-  Node[5] (Children: []) - Rect(x:450.0, y:550.0, w:100.0, h:100.0) Z: 10
