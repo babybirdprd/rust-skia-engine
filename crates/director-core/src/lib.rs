@@ -13,7 +13,7 @@
 //! *   **Layout**: Full implementation of Flexbox and CSS Grid layout via Taffy.
 //! *   **Scripting**: Built-in bindings for Rhai to drive the engine from scripts.
 //! *   **Video Encoding**: Integrated FFmpeg support for exporting to MP4.
-//! *   **Rich Text**: Advanced typography support using `cosmic-text`.
+//! *   **Rich Text**: Advanced typography support using `skia_safe::textlayout`.
 //! *   **Animation**: Physics-based springs and keyframe animations.
 //!
 //! ## Usage
