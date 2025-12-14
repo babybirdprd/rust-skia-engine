@@ -1,6 +1,6 @@
-# Director Engine
+# Director
 
-**A high-performance, frame-based video rendering engine in Rust.**
+**A programmatic video rendering engine in Rust.**
 
 Director combines Taffy (CSS Flexbox), Skia (rasterization), and Rhai (scripting) to enable programmatic video generation with a clean, declarative API.
 
