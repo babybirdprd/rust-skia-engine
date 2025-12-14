@@ -1,5 +1,7 @@
 # Director
 
+> ⚠️ **Pre-release** — API may change before v1.0
+
 **A programmatic video rendering engine in Rust.**
 
 Director combines Taffy (CSS Flexbox), Skia (rasterization), and Rhai (scripting) to enable programmatic video generation with a clean, declarative API.
