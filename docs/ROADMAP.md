@@ -59,3 +59,33 @@ We have achieved a stable architectural foundation.
 *   **Text Engine**: Switched from `cosmic-text` to `SkParagraph` to resolve layout rounding errors and support complex shaping.
 *   **Video Decoding**: Split into `Async` (Preview) and `Sync` (Export) backends to guarantee frame-perfect exports.
 *   **Asset Loading**: Decoupled IO from Rendering via the `AssetLoader` trait to support WASM/Cloud environments.
+
+---
+
+## 🔮 Future Vision: AI Integration
+
+*These features require external AI model integration (SAM 3, Parakeet, TTS) and are beyond V2 scope.*
+
+### Flagship AI Workflows
+
+| **Capability** | **Description** |
+| :--- | :--- |
+| **Smart Captions** | Auto-position subtitles to avoid faces (SAM 3 + Parakeet) |
+| **Object Pinning** | `node.pin_to_object("face")` — track and attach overlays |
+| **Auto-Reframe** | `video.auto_reframe(aspect: "9:16", target: "main_actor")` |
+| **Localization** | Translate + re-time video to match new audio duration |
+
+### AI Feature Phases
+
+**Phase 1: Essentials**
+- [ ] Object Pinning
+- [ ] Auto-Subtitles with karaoke animation
+- [ ] Smart Crop / Auto-Reframe
+
+**Phase 2: "Magician" Tools**
+- [ ] Object Removal (Inpainting)
+- [ ] Depth Sorting ("put text behind the person")
+- [ ] Style Transfer (mask-constrained shaders)
+
+**Phase 3: Generative Director**
+- [ ] Script-to-Video pipeline (LLM → Rhai → Render)
