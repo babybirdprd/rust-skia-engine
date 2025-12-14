@@ -1,81 +1,149 @@
 # Agent Instructions for `director-engine`
 
-This file outlines the architectural standards, critical constraints, and navigation tips for working with the `director-engine` codebase.
+Instructions for AI agents working with this codebase.
 
-## 1. Project Structure & Organization
-The project is a Cargo Workspace with the following members:
-*   `crates/director-core`: The core library containing the rendering engine, scene graph, and systems.
-*   `crates/director-cli`: The command-line binary wrapper (`director-engine`).
-*   `crates/director-schema`: Data models and JSON contracts.
-*   `crates/director-pipeline`: processing pipeline.
-*   `crates/lottie-*`: Support crates for Lottie animations.
+---
 
-**Key Locations:**
-*   **Documentation:** `docs/` (Centralized documentation).
-*   **Tests:** `crates/director-core/tests/` (Integration tests & Rhai scripts).
-*   **Systems:** `crates/director-core/src/systems/` (Renderer, Layout, Assets).
-*   **Nodes:** `crates/director-core/src/node/` (Implementations of `BoxNode`, `TextNode`, etc.).
-*   **Scene Graph:** `crates/director-core/src/scene.rs` (Node container and hierarchy).
+## Project Overview
 
-## 2. Core Architecture & Concepts
+**Director Engine** is a programmatic video rendering engine in Rust. It combines:
+- **Taffy** — CSS Flexbox layout
+- **Skia** — 2D rasterization
+- **Rhai** — Scripting language
+- **video-rs** — FFmpeg video encoding
 
-### The Director & Timeline
-*   The `Director` struct manages a `timeline` of `TimelineItem`s (Scenes).
-*   It does **not** have a single root node. Instead, it renders the active scene's root based on the current time.
-*   **Transitions:** Handled by overlap ("Ripple Logic"). Adding a transition shifts subsequent scenes earlier.
+---
 
-### Scene Graph & Nodes
-*   **Storage:** Nodes are stored in a flat `Vec<Option<SceneNode>>` (Arena/Free-list) in `SceneGraph`.
-*   **IDs:** `NodeId` is a `usize` index.
-*   **Hierarchy:** `SceneNode` structs hold `children: Vec<NodeId>` and `parent: Option<NodeId>`.
-*   **Element Trait:** All visual objects implement the `Element` trait (`measure`, `layout_style`, `render`, `update`).
+## Workspace Structure
+
+```
+crates/
+├── director-core/       # Main engine (95% of logic)
+│   ├── src/
+│   │   ├── director.rs      # Timeline coordinator
+│   │   ├── scene.rs         # Scene graph (arena storage)
+│   │   ├── scripting.rs     # Rhai API bindings
+│   │   ├── animation.rs     # Keyframe/spring animation
+│   │   ├── node/            # Node implementations
+│   │   └── systems/         # Renderer, Layout, Assets
+│   └── tests/               # Integration tests
+├── director-cli/        # CLI binary
+├── director-schema/     # Schema types
+├── director-pipeline/   # Asset pipeline
+└── lottie-*/            # Lottie animation support
+```
+
+---
+
+## Key Concepts
+
+### Director & Timeline
+- `Director` manages a `Vec<TimelineItem>` (scenes)
+- Each scene has a root `NodeId` and time range
+- Transitions create overlap between scenes
+
+### Scene Graph
+- **Arena storage**: `Vec<Option<SceneNode>>` in `SceneGraph`
+- **NodeId**: `usize` index
+- **Hierarchy**: `children: Vec<NodeId>`, `parent: Option<NodeId>`
+- **Element trait**: All nodes implement `Element` (render, update, measure)
 
 ### Layout (Taffy)
-*   The engine uses **Taffy** (Flexbox) for layout.
-*   **Decoupled Transforms:** Layout calculates the base `layout_rect`. Affine transforms (`scale`, `rotation`, `translate`) are applied *visually* during render but do not affect the Taffy layout flow.
-*   **Intrinsic Sizing:** Elements like `TextNode` implement `needs_measure()` and `measure()` to inform Taffy of their content size.
+- Flexbox layout computed every frame
+- Transforms (scale, rotation) are visual-only, don't affect layout
+- `needs_measure()` nodes report intrinsic size to Taffy
 
 ### Rendering Pipeline
-*   **Backend:** `skia-safe` (Skia).
-*   **Pipeline:** `Director::update(time)` -> `LayoutEngine::compute_layout` -> `Director::run_post_layout` -> `render_recursive`.
-*   **Threading:** `AssetManager` (specifically shader cache) is `!Send`.
-    *   **Constraint:** Structs requiring `Send` (like `LottieContext`) must **not** hold the full `AssetManager`. They should only hold thread-safe components like `AssetLoader`.
+1. `Director::update(time)` — Update animations
+2. `LayoutEngine::compute_layout()` — Taffy pass
+3. `Director::run_post_layout()` — Post-layout hooks
+4. `render_recursive()` — Skia drawing
 
-## 3. Critical Implementation Details
+---
+
+## Critical Files
+
+| File | Purpose |
+|------|---------|
+| `scripting.rs` | All Rhai API bindings |
+| `director.rs` | Timeline and update loop |
+| `scene.rs` | Scene graph storage |
+| `systems/renderer.rs` | Skia rendering |
+| `systems/layout.rs` | Taffy layout |
+| `node/text.rs` | Text rendering (SkParagraph) |
+| `node/box_node.rs` | Box layout/styling |
+
+---
+
+## Common Tasks
+
+### Add a Rhai API
+1. Edit `crates/director-core/src/scripting.rs`
+2. Use `engine.register_fn("name", |...| { ... })`
+3. Update `docs/SCRIPTING.md`
+
+### Add a Node Type
+1. Create `crates/director-core/src/node/my_node.rs`
+2. Implement `Element` trait
+3. Add to `node/mod.rs`
+4. Add Rhai binding in `scripting.rs`
+
+### Run Tests
+```bash
+cargo test -p director-core           # All tests
+cargo test -p director-core --test examples  # Example validation
+cargo test -p director-core layout    # Specific test
+```
+
+### Update Snapshots
+```bash
+$env:UPDATE_SNAPSHOTS="1"; cargo test -p director-core
+```
+
+---
+
+## Constraints
+
+### Threading
+- `AssetManager` is `!Send` (shader cache)
+- Use `Arc<dyn AssetLoader>` for thread-safe asset loading
+- `Director` is wrapped in `Arc<Mutex<>>` for Rhai handles
 
 ### Text Rendering
-*   **Engine:** Uses `skia_safe::textlayout::Paragraph` (SkParagraph).
-*   **No Cosmic Text:** We do not use `cosmic-text`.
-*   **Vertical Centering:** Enforced via `StrutStyle` with `height: 1.2` and `ForceStrutHeight`.
-*   **Rich Text:** Supported via `TextSpan` and `ParagraphBuilder`.
+- Uses `skia_safe::textlayout::Paragraph` (SkParagraph)
+- NOT cosmic-text
+- Text animators currently DISABLED (V2 feature)
 
-### Animation & Physics
-*   **Tweening:** Linear keyframes via `Animated<f32>`.
-*   **Physics:** Spring animations are "baked" into linear keyframes at 60fps at the moment of creation.
-*   **Shader Animation:** `EffectNode` supports animating shader uniforms (`Float` and `Vec`) via `TweenableVector`.
+### Performance
+- Avoid logging in per-pixel or per-frame loops
+- Use `tracing::debug!` for development-only logs
+- Large assets not in git — use `assets/` folder
 
-### Scripting (Rhai)
-*   **Binding:** `crates/director-core/src/scripting.rs` contains all Rhai bindings.
-*   **Conventions:**
-    *   API methods often accept property maps (e.g., `add_box(#{ ... })`).
-    *   Layout properties in maps support snake_case (e.g., `flex_direction`).
-    *   `Director` is wrapped in `Arc<Mutex<>>` for handles (`MovieHandle`, `NodeHandle`).
+---
 
-## 4. Common Pitfalls & "Gotchas"
-*   **Coordinate System:** Skia uses upper-left origin (0,0).
-*   **Z-Index:** `SceneNode.z_index` controls draw order within a sibling group. It is a visual sort, distinct from Taffy's layout order.
-*   **ObjectFit:** `VectorNode` currently defaults to **Stretch** (Fill), ignoring aspect ratio. `ImageNode` and `VideoNode` support `Cover`, `Contain`, `Fill`.
-*   **Assets:** Large assets are not in git. Use `setup_assets.sh`. Run with `--features mock_video` if system FFmpeg is missing.
+## Logging
 
-## 5. Development Workflow
-*   **Verify Changes:** Always run verification tests in `crates/director-core/tests/`.
-*   **Docs:** Update `docs/` when changing API surfaces.
-*   **Build:** Use `cargo build -p director-cli` to build the engine.
+Uses `tracing` ecosystem:
+```rust
+tracing::info!(width, height, "Director initialized");
+tracing::warn!("Feature disabled: {}", name);
+tracing::debug!(frame, elapsed_ms, "Frame rendered");
+```
 
-## 6. Logging & Debugging
-*   **Framework:** Use the `tracing` ecosystem for all logging.
-    *   **Core:** Use `tracing::info!`, `tracing::warn!`, `tracing::error!` (and `debug!`/`trace!`).
-    *   **Context:** Use `#[tracing::instrument]` on critical functions (`Director::update`, `LayoutEngine::compute_layout`, `AssetLoader::load_bytes`).
-*   **CLI:** `director-cli` initializes `tracing_subscriber` writing to `stderr`.
-    *   **Output:** Supports strict NDJSON (`--log-format=json`) for machine consumption.
-*   **Tests:** Initialize `tracing_subscriber` with `TestWriter` in tests to capture logs.
+For tests:
+```rust
+let _ = tracing_subscriber::fmt()
+    .with_test_writer()
+    .try_init();
+```
+
+---
+
+## Documentation
+
+| Doc | Purpose |
+|-----|---------|
+| `docs/SCRIPTING.md` | Rhai API reference |
+| `docs/ARCHITECTURE.md` | Engine design |
+| `docs/ROADMAP.md` | Development milestones |
+| `examples/` | Working Rhai scripts |
