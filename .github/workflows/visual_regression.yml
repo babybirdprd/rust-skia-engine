@@ -23,7 +23,8 @@ jobs:
         sudo apt-get install -y \
           libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavfilter-dev libavdevice-dev \
           clang libclang-dev llvm-dev \
-          libasound2-dev pkg-config build-essential
+          libasound2-dev pkg-config build-essential \
+          libfreetype6-dev libfontconfig1-dev
 
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
