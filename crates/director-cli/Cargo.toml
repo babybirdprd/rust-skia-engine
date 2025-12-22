@@ -7,11 +7,20 @@ license = "MIT"
 
 [dependencies]
 clap = { version = "4.5.53", features = ["derive"] }
-director-core = { path = "../director-core" }
+director-core = { path = "../director-core", default-features = false }
 rhai = "1.23.6"
 tracing = "0.1.43"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
 
+[features]
+default = ["video"]
+video = ["director-core/video-rs"]
+mock_video = ["director-core/mock_video"]
+
 [[bin]]
 name = "director-engine"
 path = "src/main.rs"
+
+[[bin]]
+name = "review_visuals"
+path = "src/bin/review_visuals.rs"
