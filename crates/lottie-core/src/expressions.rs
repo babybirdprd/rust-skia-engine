@@ -1,11 +1,7 @@
 #[cfg(feature = "expressions")]
 use boa_engine::{
-    context::ContextBuilder,
-    js_string,
-    native_function::NativeFunction,
-    object::builtins::JsArray,
-    property::Attribute,
-    Context, JsArgs, JsResult, JsValue, Source,
+    context::ContextBuilder, js_string, native_function::NativeFunction, object::builtins::JsArray,
+    property::Attribute, Context, JsArgs, JsResult, JsValue, Source,
 };
 
 #[cfg(feature = "expressions")]
@@ -94,7 +90,11 @@ impl ExpressionEvaluator {
 
         // '__loop_value' (internal)
         self.context
-            .register_global_property(js_string!("__loop_value"), loop_value.clone(), Attribute::all())
+            .register_global_property(
+                js_string!("__loop_value"),
+                loop_value.clone(),
+                Attribute::all(),
+            )
             .map_err(|e| format!("Failed to register loop value: {}", e))?;
 
         // 'time' (in seconds)
@@ -108,12 +108,15 @@ impl ExpressionEvaluator {
                 js_string!("loopOut"),
                 0,
                 NativeFunction::from_fn_ptr(|_this, _args, context| {
-                     // Return pre-calculated loop value
-                     let val = context.global_object().get(js_string!("__loop_value"), context).unwrap_or_default();
-                     Ok(val)
-                })
+                    // Return pre-calculated loop value
+                    let val = context
+                        .global_object()
+                        .get(js_string!("__loop_value"), context)
+                        .unwrap_or_default();
+                    Ok(val)
+                }),
             )
-             .map_err(|e| format!("Failed to register loopOut: {}", e))?;
+            .map_err(|e| format!("Failed to register loopOut: {}", e))?;
 
         match self.context.eval(Source::from_bytes(script)) {
             Ok(res) => Ok(res),
@@ -134,8 +137,12 @@ fn helper_add(a: &JsValue, b: &JsValue, context: &mut Context) -> JsResult<JsVal
     // If one is array, add scalar to components.
     if let (Some(obj_a), Some(obj_b)) = (a.as_object(), b.as_object()) {
         if obj_a.is_array() && obj_b.is_array() {
-            let len_a = obj_a.get(js_string!("length"), context)?.to_number(context)? as u64;
-            let len_b = obj_b.get(js_string!("length"), context)?.to_number(context)? as u64;
+            let len_a = obj_a
+                .get(js_string!("length"), context)?
+                .to_number(context)? as u64;
+            let len_b = obj_b
+                .get(js_string!("length"), context)?
+                .to_number(context)? as u64;
             let len = std::cmp::min(len_a, len_b);
             let mut result = Vec::new();
             for i in 0..len {
@@ -156,8 +163,12 @@ fn helper_add(a: &JsValue, b: &JsValue, context: &mut Context) -> JsResult<JsVal
 fn helper_sub(a: &JsValue, b: &JsValue, context: &mut Context) -> JsResult<JsValue> {
     if let (Some(obj_a), Some(obj_b)) = (a.as_object(), b.as_object()) {
         if obj_a.is_array() && obj_b.is_array() {
-            let len_a = obj_a.get(js_string!("length"), context)?.to_number(context)? as u64;
-            let len_b = obj_b.get(js_string!("length"), context)?.to_number(context)? as u64;
+            let len_a = obj_a
+                .get(js_string!("length"), context)?
+                .to_number(context)? as u64;
+            let len_b = obj_b
+                .get(js_string!("length"), context)?
+                .to_number(context)? as u64;
             let len = std::cmp::min(len_a, len_b);
             let mut result = Vec::new();
             for i in 0..len {
@@ -175,13 +186,15 @@ fn helper_sub(a: &JsValue, b: &JsValue, context: &mut Context) -> JsResult<JsVal
 
 #[cfg(feature = "expressions")]
 fn helper_mul(a: &JsValue, b: &JsValue, context: &mut Context) -> JsResult<JsValue> {
-     // Check for Vector * Scalar
+    // Check for Vector * Scalar
     if let Some(obj_a) = a.as_object() {
         if obj_a.is_array() {
             let scalar_b = b.to_number(context)?;
-            let len = obj_a.get(js_string!("length"), context)?.to_number(context)? as u64;
+            let len = obj_a
+                .get(js_string!("length"), context)?
+                .to_number(context)? as u64;
             let mut result = Vec::new();
-             for i in 0..len {
+            for i in 0..len {
                 let val_a = obj_a.get(i, context)?.to_number(context)?;
                 result.push(JsValue::new(val_a * scalar_b));
             }
@@ -192,9 +205,11 @@ fn helper_mul(a: &JsValue, b: &JsValue, context: &mut Context) -> JsResult<JsVal
     if let Some(obj_b) = b.as_object() {
         if obj_b.is_array() {
             let scalar_a = a.to_number(context)?;
-            let len = obj_b.get(js_string!("length"), context)?.to_number(context)? as u64;
+            let len = obj_b
+                .get(js_string!("length"), context)?
+                .to_number(context)? as u64;
             let mut result = Vec::new();
-             for i in 0..len {
+            for i in 0..len {
                 let val_b = obj_b.get(i, context)?.to_number(context)?;
                 result.push(JsValue::new(scalar_a * val_b));
             }
@@ -213,10 +228,14 @@ fn helper_div(a: &JsValue, b: &JsValue, context: &mut Context) -> JsResult<JsVal
     if let Some(obj_a) = a.as_object() {
         if obj_a.is_array() {
             let scalar_b = b.to_number(context)?;
-            if scalar_b == 0.0 { return Ok(JsValue::nan()); }
-            let len = obj_a.get(js_string!("length"), context)?.to_number(context)? as u64;
+            if scalar_b == 0.0 {
+                return Ok(JsValue::nan());
+            }
+            let len = obj_a
+                .get(js_string!("length"), context)?
+                .to_number(context)? as u64;
             let mut result = Vec::new();
-             for i in 0..len {
+            for i in 0..len {
                 let val_a = obj_a.get(i, context)?.to_number(context)?;
                 result.push(JsValue::new(val_a / scalar_b));
             }

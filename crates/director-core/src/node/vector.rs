@@ -1,10 +1,10 @@
 use crate::element::Element;
-use skia_safe::{Canvas, Image, Rect, Paint, Data, ColorType, AlphaType, ColorSpace};
-use taffy::style::Style;
-use std::sync::{Arc, Mutex};
+use skia_safe::{AlphaType, Canvas, ColorSpace, ColorType, Data, Image, Paint, Rect};
 use std::any::Any;
-use usvg::{Tree, Options};
+use std::sync::{Arc, Mutex};
+use taffy::style::Style;
 use tiny_skia::{Pixmap, Transform};
+use usvg::{Options, Tree};
 
 /// A node that renders scalable vector graphics (SVG).
 ///
@@ -43,8 +43,12 @@ impl VectorNode {
 }
 
 impl Element for VectorNode {
-    fn as_any(&self) -> &dyn Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn Any { self }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
 
     fn layout_style(&self) -> Style {
         self.style.clone()
@@ -59,7 +63,13 @@ impl Element for VectorNode {
         true
     }
 
-    fn render(&self, canvas: &Canvas, rect: Rect, parent_opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) -> Result<(), crate::RenderError> {
+    fn render(
+        &self,
+        canvas: &Canvas,
+        rect: Rect,
+        parent_opacity: f32,
+        draw_children: &mut dyn FnMut(&Canvas),
+    ) -> Result<(), crate::RenderError> {
         let width = rect.width().ceil() as u32;
         let height = rect.height().ceil() as u32;
 
@@ -72,9 +82,9 @@ impl Element for VectorNode {
 
         // Check if cache is valid
         let needs_update = if let Some((w, h, _)) = *cache_guard {
-             w != width || h != height
+            w != width || h != height
         } else {
-             true
+            true
         };
 
         if needs_update {
@@ -97,7 +107,9 @@ impl Element for VectorNode {
                     Some(ColorSpace::new_srgb()),
                 );
 
-                if let Some(img) = skia_safe::images::raster_from_data(&image_info, data, (width * 4) as usize) {
+                if let Some(img) =
+                    skia_safe::images::raster_from_data(&image_info, data, (width * 4) as usize)
+                {
                     *cache_guard = Some((width, height, img));
                 }
             }
@@ -116,7 +128,14 @@ impl Element for VectorNode {
         Ok(())
     }
 
-    fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str) {
+    fn animate_property(
+        &mut self,
+        property: &str,
+        start: f32,
+        target: f32,
+        duration: f64,
+        easing: &str,
+    ) {
         if property == "opacity" {
             let ease = match easing {
                 "linear" => crate::animation::EasingType::Linear,

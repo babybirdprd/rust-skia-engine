@@ -1,28 +1,33 @@
-use director_core::{Director, DefaultAssetLoader, video_wrapper::RenderMode};
-use skia_safe::{ColorType, AlphaType, ColorSpace, EncodedImageFormat};
-use std::path::PathBuf;
+use director_core::{video_wrapper::RenderMode, DefaultAssetLoader, Director};
+use image::{GenericImageView, Pixel, Rgba};
+use skia_safe::{AlphaType, ColorSpace, ColorType, EncodedImageFormat};
 use std::env;
 use std::fs;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use image::{GenericImageView, Rgba, Pixel};
 
 /// Configuration for visual comparison
 pub struct VisualConfig {
-    pub tolerance: u8, // Max channel difference (0-255) to consider "equal"
+    pub tolerance: u8,  // Max channel difference (0-255) to consider "equal"
     pub threshold: f64, // Max percentage of pixels that can differ
 }
 
 impl Default for VisualConfig {
     fn default() -> Self {
         Self {
-            tolerance: 2, // Allow small rendering noises (e.g. 1-2 value diffs)
+            tolerance: 2,   // Allow small rendering noises (e.g. 1-2 value diffs)
             threshold: 0.1, // 0.1% pixels allowed to differ (anti-aliasing edges)
         }
     }
 }
 
 /// Helper function to save a difference map between two images.
-fn save_diff_image(reference: &image::RgbaImage, actual: &image::RgbaImage, path: &PathBuf, tolerance: u8) {
+fn save_diff_image(
+    reference: &image::RgbaImage,
+    actual: &image::RgbaImage,
+    path: &PathBuf,
+    tolerance: u8,
+) {
     let width = reference.width();
     let height = reference.height();
 
@@ -67,11 +72,11 @@ pub fn setup_test_director(width: u32, height: u32) -> Arc<Mutex<Director>> {
         .with_max_level(tracing::Level::WARN)
         .try_init();
 
-    use director_core::systems::assets::AssetManager;
     use director_core::director::DirectorContext;
+    use director_core::systems::assets::AssetManager;
     use director_core::AssetLoader;
-    use skia_safe::{FontMgr, Data};
     use skia_safe::textlayout::{FontCollection, TypefaceFontProvider};
+    use skia_safe::{Data, FontMgr};
     use std::collections::HashMap;
 
     // 1. Setup Assets
@@ -93,9 +98,12 @@ pub fn setup_test_director(width: u32, height: u32) -> Arc<Mutex<Director>> {
             } else {
                 eprintln!("Failed to create Typeface from bundled font data");
             }
-        },
+        }
         Err(e) => {
-             eprintln!("Failed to load bundled font '{}': {}. ensure assets/fonts/ exists.", font_path, e);
+            eprintln!(
+                "Failed to load bundled font '{}': {}. ensure assets/fonts/ exists.",
+                font_path, e
+            );
         }
     }
 
@@ -119,7 +127,7 @@ pub fn setup_test_director(width: u32, height: u32) -> Arc<Mutex<Director>> {
         30,
         loader,
         RenderMode::Preview,
-        Some(ctx)
+        Some(ctx),
     );
 
     Arc::new(Mutex::new(director))
@@ -138,15 +146,16 @@ pub fn assert_visual_match(director: &mut Director, time: f64, test_suite: &str,
         Some(ColorSpace::new_srgb()),
     );
 
-    let mut surface = skia_safe::surfaces::raster(&info, None, None)
-        .expect("Failed to create Skia surface");
+    let mut surface =
+        skia_safe::surfaces::raster(&info, None, None).expect("Failed to create Skia surface");
 
     // 2. Render Frame
     director_core::systems::renderer::render_frame(director, time, surface.canvas());
 
     // 3. Encode to PNG
     let image = surface.image_snapshot();
-    let data = image.encode(None, EncodedImageFormat::PNG, 100)
+    let data = image
+        .encode(None, EncodedImageFormat::PNG, 100)
         .expect("Failed to encode image to PNG");
     let rendered_bytes = data.as_bytes();
 
@@ -174,7 +183,10 @@ pub fn assert_visual_match(director: &mut Director, time: f64, test_suite: &str,
     if !snapshot_path.exists() {
         // Fallback: try without OS suffix if specific OS one is missing?
         // For now, strict.
-        panic!("Snapshot not found: {:?}. Run with UPDATE_SNAPSHOTS=1 to generate.", snapshot_path);
+        panic!(
+            "Snapshot not found: {:?}. Run with UPDATE_SNAPSHOTS=1 to generate.",
+            snapshot_path,
+        );
     }
 
     let reference_img = image::open(&snapshot_path)
@@ -187,12 +199,15 @@ pub fn assert_visual_match(director: &mut Director, time: f64, test_suite: &str,
 
     // 6. Compare Dimensions
     if reference_img.dimensions() != rendered_img.dimensions() {
-         let fail_dir = PathBuf::from(manifest_dir).join("target/visual_regression_failures");
+        let fail_dir = PathBuf::from(manifest_dir).join("target/visual_regression_failures");
         if !fail_dir.exists() {
             fs::create_dir_all(&fail_dir).ok();
         }
 
-        let actual_path = fail_dir.join(format!("{}_{}_{}_actual.png", test_suite, test_case, os_suffix));
+        let actual_path = fail_dir.join(format!(
+            "{}_{}_{}_actual.png",
+            test_suite, test_case, os_suffix
+        ));
         // We can't generate a diff image easily for different dimensions, but we can save actual.
         fs::write(&actual_path, rendered_bytes).expect("Failed to save failure artifact");
 
@@ -200,7 +215,7 @@ pub fn assert_visual_match(director: &mut Director, time: f64, test_suite: &str,
             "Dimension mismatch! Reference: {:?}, Rendered: {:?}. Artifact saved to {:?}",
             reference_img.dimensions(),
             rendered_img.dimensions(),
-            actual_path
+            actual_path,
         );
     }
 
@@ -219,7 +234,10 @@ pub fn assert_visual_match(director: &mut Director, time: f64, test_suite: &str,
     let diff_percent = (diff_pixels as f64 / total_pixels as f64) * 100.0;
 
     if diff_percent > config.threshold {
-        println!("Visual Difference: {:.4}% ({} / {} pixels)", diff_percent, diff_pixels, total_pixels);
+        println!(
+            "Visual Difference: {:.4}% ({} / {} pixels)",
+            diff_percent, diff_pixels, total_pixels
+        );
 
         // Save artifacts
         let fail_dir = PathBuf::from(manifest_dir).join("target/visual_regression_failures");
@@ -227,8 +245,14 @@ pub fn assert_visual_match(director: &mut Director, time: f64, test_suite: &str,
             fs::create_dir_all(&fail_dir).ok();
         }
 
-        let actual_path = fail_dir.join(format!("{}_{}_{}_actual.png", test_suite, test_case, os_suffix));
-        let diff_path = fail_dir.join(format!("{}_{}_{}_diff.png", test_suite, test_case, os_suffix));
+        let actual_path = fail_dir.join(format!(
+            "{}_{}_{}_actual.png",
+            test_suite, test_case, os_suffix
+        ));
+        let diff_path = fail_dir.join(format!(
+            "{}_{}_{}_diff.png",
+            test_suite, test_case, os_suffix
+        ));
 
         fs::write(&actual_path, rendered_bytes).expect("Failed to save failure artifact");
         save_diff_image(&reference_img, &rendered_img, &diff_path, config.tolerance);
@@ -237,7 +261,7 @@ pub fn assert_visual_match(director: &mut Director, time: f64, test_suite: &str,
             "Visual regression failed! Image differed by {:.4}%. \nArtifacts:\n  Actual: {:?}\n  Diff:   {:?}",
             diff_percent,
             actual_path,
-            diff_path
+            diff_path,
         );
     }
 }

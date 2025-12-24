@@ -24,8 +24,7 @@ pub mod composition;
 pub use composition::CompositionNode;
 
 pub mod effect;
-pub use effect::{EffectNode, EffectType, ShaderUniform, build_effect_filter};
-
+pub use effect::{build_effect_filter, EffectNode, EffectType, ShaderUniform};
 
 // Helper to parse easing
 pub fn parse_easing(e: &str) -> EasingType {
@@ -39,12 +38,7 @@ pub fn parse_easing(e: &str) -> EasingType {
     }
 }
 
-pub fn calculate_object_fit_rect(
-    src_w: f32,
-    src_h: f32,
-    dst_rect: Rect,
-    fit: ObjectFit,
-) -> Rect {
+pub fn calculate_object_fit_rect(src_w: f32, src_h: f32, dst_rect: Rect, fit: ObjectFit) -> Rect {
     match fit {
         ObjectFit::Fill => dst_rect,
         ObjectFit::Contain | ObjectFit::Cover => {

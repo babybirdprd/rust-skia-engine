@@ -1,16 +1,19 @@
-use crate::element::Element;
-use skia_safe::{Canvas, Rect, Image, Paint, SamplingOptions, surfaces, ImageInfo, ColorType, AlphaType, Color, FontMgr, Data};
-use taffy::style::Style;
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
-use std::any::Any;
-use lottie_core::{LottiePlayer, LottieAsset};
-use lottie_data::model::LottieJson;
-use lottie_skia::{SkiaRenderer, LottieContext};
 use crate::animation::{Animated, EasingType};
+use crate::element::Element;
 use crate::systems::assets::AssetManager;
 use crate::AssetLoader;
 use crate::RenderError;
+use lottie_core::{LottieAsset, LottiePlayer};
+use lottie_data::model::LottieJson;
+use lottie_skia::{LottieContext, SkiaRenderer};
+use skia_safe::{
+    surfaces, AlphaType, Canvas, Color, ColorType, Data, FontMgr, Image, ImageInfo, Paint, Rect,
+    SamplingOptions,
+};
+use std::any::Any;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use taffy::style::Style;
 
 /// Manages external assets (images, fonts) required by a Lottie animation.
 pub struct LottieAssetManager {
@@ -23,8 +26,8 @@ pub struct LottieAssetManager {
 impl std::fmt::Debug for LottieAssetManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LottieAssetManager")
-         .field("images_count", &self.images.len())
-         .finish()
+            .field("images_count", &self.images.len())
+            .finish()
     }
 }
 
@@ -40,8 +43,8 @@ impl LottieContext for LottieAssetManager {
 
         for path in candidates {
             if let Some(bytes) = self.load_bytes(&path) {
-                 let data = Data::new_copy(&bytes);
-                 return FontMgr::new().new_from_data(&data, 0);
+                let data = Data::new_copy(&bytes);
+                return FontMgr::new().new_from_data(&data, 0);
             }
         }
         None
@@ -75,16 +78,20 @@ pub struct LottieNode {
 
 impl std::fmt::Debug for LottieNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let cache_state = if self.cache.lock().unwrap().is_some() { "Some" } else { "None" };
+        let cache_state = if self.cache.lock().unwrap().is_some() {
+            "Some"
+        } else {
+            "None"
+        };
         f.debug_struct("LottieNode")
-         .field("style", &self.style)
-         .field("opacity", &self.opacity)
-         .field("frame", &self.frame)
-         .field("speed", &self.speed)
-         .field("loop_anim", &self.loop_anim)
-         .field("asset_manager", &self.asset_manager)
-         .field("cache", &cache_state)
-         .finish()
+            .field("style", &self.style)
+            .field("opacity", &self.opacity)
+            .field("frame", &self.frame)
+            .field("speed", &self.speed)
+            .field("loop_anim", &self.loop_anim)
+            .field("asset_manager", &self.asset_manager)
+            .field("cache", &cache_state)
+            .finish()
     }
 }
 
@@ -109,7 +116,11 @@ impl Clone for LottieNode {
 
 impl LottieNode {
     /// Creates a new LottieNode from raw JSON bytes.
-    pub fn new(data: &[u8], assets: HashMap<String, Image>, asset_manager: &AssetManager) -> anyhow::Result<Self> {
+    pub fn new(
+        data: &[u8],
+        assets: HashMap<String, Image>,
+        asset_manager: &AssetManager,
+    ) -> anyhow::Result<Self> {
         let json_str = std::str::from_utf8(data)?;
         let model: LottieJson = serde_json::from_str(json_str)?;
 
@@ -125,18 +136,29 @@ impl LottieNode {
             frame: Animated::new(0.0),
             speed: 1.0,
             loop_anim: false,
-            asset_manager: Arc::new(LottieAssetManager { images: assets, asset_loader: asset_manager.loader.clone() }),
+            asset_manager: Arc::new(LottieAssetManager {
+                images: assets,
+                asset_loader: asset_manager.loader.clone(),
+            }),
             cache: Mutex::new(None),
         })
     }
 }
 
 impl Element for LottieNode {
-    fn as_any(&self) -> &dyn Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn Any { self }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
 
-    fn layout_style(&self) -> Style { self.style.clone() }
-    fn set_layout_style(&mut self, style: Style) { self.style = style; }
+    fn layout_style(&self) -> Style {
+        self.style.clone()
+    }
+    fn set_layout_style(&mut self, style: Style) {
+        self.style = style;
+    }
 
     fn update(&mut self, time: f64) -> bool {
         self.opacity.update(time);
@@ -146,35 +168,41 @@ impl Element for LottieNode {
 
         // If frame property has keyframes (more than the initial one), use it.
         if self.frame.raw_keyframes.len() > 1 {
-             player.current_frame = self.frame.current_value;
+            player.current_frame = self.frame.current_value;
         } else {
-             let fps = self.asset.frame_rate;
-             let start_frame = self.asset.model.ip;
-             let end_frame = self.asset.model.op;
+            let fps = self.asset.frame_rate;
+            let start_frame = self.asset.model.ip;
+            let end_frame = self.asset.model.op;
 
-             // Check if duration is valid
-             let total_frames = end_frame - start_frame;
+            // Check if duration is valid
+            let total_frames = end_frame - start_frame;
 
-             let current_raw = time * fps as f64 * self.speed as f64;
+            let current_raw = time * fps as f64 * self.speed as f64;
 
-             if self.loop_anim && total_frames > 0.0 {
-                 let looped = (current_raw % total_frames as f64) + start_frame as f64;
-                 player.current_frame = looped as f32;
-             } else {
-                 let frame = start_frame as f64 + current_raw;
-                 // Clamp to end
-                 if frame > end_frame as f64 {
-                     player.current_frame = end_frame;
-                 } else {
-                     player.current_frame = frame as f32;
-                 }
-             }
+            if self.loop_anim && total_frames > 0.0 {
+                let looped = (current_raw % total_frames as f64) + start_frame as f64;
+                player.current_frame = looped as f32;
+            } else {
+                let frame = start_frame as f64 + current_raw;
+                // Clamp to end
+                if frame > end_frame as f64 {
+                    player.current_frame = end_frame;
+                } else {
+                    player.current_frame = frame as f32;
+                }
+            }
         }
 
         true
     }
 
-    fn render(&self, canvas: &Canvas, rect: Rect, parent_opacity: f32, _draw_children: &mut dyn FnMut(&Canvas)) -> Result<(), RenderError> {
+    fn render(
+        &self,
+        canvas: &Canvas,
+        rect: Rect,
+        parent_opacity: f32,
+        _draw_children: &mut dyn FnMut(&Canvas),
+    ) -> Result<(), RenderError> {
         let mut player = self.player.lock().unwrap();
         let current_frame = player.current_frame;
         let final_opacity = self.opacity.current_value * parent_opacity;
@@ -199,26 +227,22 @@ impl Element for LottieNode {
 
         // Check cache hit
         let hit = if let Some((cached_frame, cached_w, cached_h, _)) = cache.as_ref() {
-             (current_frame - cached_frame).abs() < 0.01 && *cached_w == w_u32 && *cached_h == h_u32
+            (current_frame - cached_frame).abs() < 0.01 && *cached_w == w_u32 && *cached_h == h_u32
         } else {
             false
         };
 
         let image = if hit {
-             cache.as_ref().unwrap().3.clone()
+            cache.as_ref().unwrap().3.clone()
         } else {
             // Miss: Render to surface
-            let image_info = ImageInfo::new(
-                (w, h),
-                ColorType::RGBA8888,
-                AlphaType::Premul,
-                None
-            );
+            let image_info = ImageInfo::new((w, h), ColorType::RGBA8888, AlphaType::Premul, None);
 
             // Try make_surface from canvas (GPU friendly)
             // Note: canvas.make_surface is not available in safe bindings directly or has different name.
             // Using raster fallback for now.
-            let mut surface = surfaces::raster(&image_info, None, None).ok_or(RenderError::SurfaceFailure)?;
+            let mut surface =
+                surfaces::raster(&image_info, None, None).ok_or(RenderError::SurfaceFailure)?;
 
             // Clear surface
             surface.canvas().clear(Color::TRANSPARENT);
@@ -228,7 +252,13 @@ impl Element for LottieNode {
             let draw_rect = Rect::from_wh(w as f32, h as f32);
 
             // Draw with alpha 1.0
-            SkiaRenderer::draw(surface.canvas(), &tree, draw_rect, 1.0, &*self.asset_manager);
+            SkiaRenderer::draw(
+                surface.canvas(),
+                &tree,
+                draw_rect,
+                1.0,
+                &*self.asset_manager,
+            );
 
             let img = surface.image_snapshot();
 
@@ -243,23 +273,24 @@ impl Element for LottieNode {
 
         let sampling = SamplingOptions::default();
 
-        canvas.draw_image_rect_with_sampling_options(
-            &image,
-            None,
-            rect,
-            sampling,
-            &paint,
-        );
+        canvas.draw_image_rect_with_sampling_options(&image, None, rect, sampling, &paint);
         Ok(())
     }
 
-    fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str) {
+    fn animate_property(
+        &mut self,
+        property: &str,
+        start: f32,
+        target: f32,
+        duration: f64,
+        easing: &str,
+    ) {
         let ease = match easing {
             "linear" => EasingType::Linear,
             "ease_in" => EasingType::EaseIn,
             "ease_out" => EasingType::EaseOut,
             "ease_in_out" => EasingType::EaseInOut,
-             _ => EasingType::Linear,
+            _ => EasingType::Linear,
         };
 
         if property == "opacity" {

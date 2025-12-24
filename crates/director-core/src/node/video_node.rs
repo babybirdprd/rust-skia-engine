@@ -1,9 +1,9 @@
 use crate::animation::Animated;
 use crate::element::Element;
 use crate::errors::RenderError;
-use crate::node::{parse_easing, calculate_object_fit_rect};
+use crate::node::{calculate_object_fit_rect, parse_easing};
 use crate::types::ObjectFit;
-use crate::video_wrapper::{VideoLoader, RenderMode, VideoResponse};
+use crate::video_wrapper::{RenderMode, VideoLoader, VideoResponse};
 use skia_safe::{AlphaType, Canvas, ClipOp, Color4f, ColorType, Data, Image, Paint, Rect};
 use std::any::Any;
 use std::io::Write;

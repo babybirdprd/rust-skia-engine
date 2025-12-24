@@ -2,9 +2,10 @@ use crate::animation::Animated;
 use crate::element::{Element, TextFit, TextShadow, TextSpan};
 use crate::types::Color;
 use skia_safe::{
-    image_filters, textlayout::{
-        FontCollection, Paragraph, ParagraphBuilder, ParagraphStyle, TextStyle, TextAlign,
-        TextDirection, TextHeightBehavior, StrutStyle,
+    image_filters,
+    textlayout::{
+        FontCollection, Paragraph, ParagraphBuilder, ParagraphStyle, StrutStyle, TextAlign,
+        TextDirection, TextHeightBehavior, TextStyle,
     },
     Canvas, Paint, PaintStyle, Rect, TileMode,
 };
@@ -64,10 +65,7 @@ impl fmt::Debug for TextNode {
 }
 
 impl TextNode {
-    pub fn new(
-        spans: Vec<TextSpan>,
-        font_collection: Arc<Mutex<FontCollection>>,
-    ) -> Self {
+    pub fn new(spans: Vec<TextSpan>, font_collection: Arc<Mutex<FontCollection>>) -> Self {
         let mut node = Self {
             spans,
             default_font_size: Animated::new(20.0),
@@ -121,7 +119,9 @@ impl TextNode {
             let mut text_style = TextStyle::new();
 
             // 1. Font Size
-            let size = span.font_size.unwrap_or(self.default_font_size.current_value);
+            let size = span
+                .font_size
+                .unwrap_or(self.default_font_size.current_value);
             text_style.set_font_size(size);
 
             // 2. Font Family
@@ -157,7 +157,11 @@ impl TextNode {
                 } else {
                     skia_safe::font_style::Slant::Upright
                 };
-                text_style.set_font_style(skia_safe::FontStyle::new(weight, skia_safe::font_style::Width::NORMAL, slant));
+                text_style.set_font_style(skia_safe::FontStyle::new(
+                    weight,
+                    skia_safe::font_style::Width::NORMAL,
+                    slant,
+                ));
             }
 
             // 6. Stroke (Rich Text)
@@ -170,9 +174,9 @@ impl TextNode {
                     if let Some(sc) = span.stroke_color {
                         stroke_paint.set_color(sc.to_skia());
                     } else {
-                         stroke_paint.set_color(skia_safe::Color::BLACK);
+                        stroke_paint.set_color(skia_safe::Color::BLACK);
                     }
-                     text_style.set_foreground_paint(&stroke_paint);
+                    text_style.set_foreground_paint(&stroke_paint);
                 }
             }
 
@@ -266,7 +270,7 @@ impl Element for TextNode {
 
         // Color::PartialEq is derived, compares float fields exactly.
         if self.default_color.current_value != old_color {
-             changed = true;
+            changed = true;
         }
 
         if changed {
@@ -334,25 +338,29 @@ impl Element for TextNode {
             canvas.save();
 
             if let Some(shadow) = &self.shadow {
-                 let mut shadow_paint = Paint::default();
-                 shadow_paint.set_color(shadow.color.to_skia());
-                 shadow_paint.set_alpha_f(opacity);
-                 shadow_paint.set_image_filter(image_filters::blur(
+                let mut shadow_paint = Paint::default();
+                shadow_paint.set_color(shadow.color.to_skia());
+                shadow_paint.set_alpha_f(opacity);
+                shadow_paint.set_image_filter(image_filters::blur(
                     (shadow.blur, shadow.blur),
                     TileMode::Decal,
                     None,
                     None,
                 ));
 
-                 // Manual shadow rendering isn't easy with SkParagraph + Paint.
-                 // We will skip shadow rendering for this PR as per plan,
-                 // or accept it might not work fully without layer.
+                // Manual shadow rendering isn't easy with SkParagraph + Paint.
+                // We will skip shadow rendering for this PR as per plan,
+                // or accept it might not work fully without layer.
             }
 
             if opacity < 1.0 {
                 let mut paint = Paint::default();
                 paint.set_alpha_f(opacity);
-                canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().bounds(&rect).paint(&paint));
+                canvas.save_layer(
+                    &skia_safe::canvas::SaveLayerRec::default()
+                        .bounds(&rect)
+                        .paint(&paint),
+                );
                 paragraph.paint(canvas, (rect.x(), rect.y()));
                 canvas.restore();
             } else {
@@ -374,10 +382,11 @@ impl Element for TextNode {
         duration: f64,
         easing: &str,
     ) {
-         match property {
+        match property {
             "font_size" | "size" => {
                 let ease_fn = crate::node::parse_easing(easing);
-                self.default_font_size.add_segment(start, target, duration, ease_fn);
+                self.default_font_size
+                    .add_segment(start, target, duration, ease_fn);
                 self.dirty_layout = true;
             }
             _ => {}

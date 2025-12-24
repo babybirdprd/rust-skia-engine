@@ -28,8 +28,8 @@ mod tests {
             t: 0.0,
             s: Some([0.0, 0.0]),
             e: Some([100.0, 100.0]),
-            i: None, // Time easing
-            o: None, // Time easing
+            i: None,                   // Time easing
+            o: None,                   // Time easing
             to: Some(vec![50.0, 0.0]), // Spatial tangent out
             ti: None,
             h: None,
@@ -59,10 +59,25 @@ mod tests {
         #[cfg(not(feature = "expressions"))]
         let evaluator = None;
 
-        let result = Animator::resolve(&prop, 5.0, |v| Vec2::from_slice(v), Vec2::ZERO, evaluator, 60.0);
+        let result = Animator::resolve(
+            &prop,
+            5.0,
+            |v| Vec2::from_slice(v),
+            Vec2::ZERO,
+            evaluator,
+            60.0,
+        );
 
         // Tolerance due to floating point
-        assert!((result.x - 68.75).abs() < 0.001, "X should be ~68.75, got {}", result.x);
-        assert!((result.y - 31.25).abs() < 0.001, "Y should be ~31.25, got {}", result.y);
+        assert!(
+            (result.x - 68.75).abs() < 0.001,
+            "X should be ~68.75, got {}",
+            result.x
+        );
+        assert!(
+            (result.y - 31.25).abs() < 0.001,
+            "Y should be ~31.25, got {}",
+            result.y
+        );
     }
 }

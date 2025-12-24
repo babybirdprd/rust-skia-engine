@@ -1,19 +1,19 @@
-use anyhow::Result;
-use std::path::PathBuf;
+use crate::audio::load_audio_bytes;
 use crate::director::{Director, TimelineItem, TransitionType};
-use crate::types::NodeId;
+use crate::errors::RenderError;
 use crate::scene::SceneGraph;
 use crate::systems::assets::AssetManager;
 use crate::systems::layout::LayoutEngine;
-use crate::audio::load_audio_bytes;
-use crate::errors::RenderError;
-use skia_safe::{ColorType, AlphaType, ColorSpace, RuntimeEffect, Data, runtime_effect::ChildPtr};
+use crate::types::NodeId;
 use crate::video_wrapper::{Encoder, EncoderSettings, Locator, Time};
+use anyhow::Result;
 use ndarray::Array3;
-use tracing::{instrument, error, debug};
+use skia_safe::{runtime_effect::ChildPtr, AlphaType, ColorSpace, ColorType, Data, RuntimeEffect};
+use std::path::PathBuf;
+use tracing::{debug, error, instrument};
 
 #[cfg(feature = "vulkan")]
-use skia_safe::gpu::{DirectContext, SurfaceOrigin, Budgeted};
+use skia_safe::gpu::{Budgeted, DirectContext, SurfaceOrigin};
 
 #[cfg(feature = "vulkan")]
 /// Type alias for the GPU context (Vulkan backend).
@@ -40,7 +40,12 @@ pub type GpuContext = ();
 /// * `audio_track_path` - Optional path to a background audio track (deprecated; use `director.add_global_audio`).
 #[allow(unused_variables)]
 #[instrument(level = "info", skip(director, gpu_context), fields(width = director.width, height = director.height, fps = director.fps))]
-pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Option<&mut GpuContext>, audio_track_path: Option<PathBuf>) -> Result<()> {
+pub fn render_export(
+    director: &mut Director,
+    out_path: PathBuf,
+    gpu_context: Option<&mut GpuContext>,
+    audio_track_path: Option<PathBuf>,
+) -> Result<()> {
     let width = director.width;
     let height = director.height;
     let fps = director.fps;
@@ -48,9 +53,13 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
     let mut max_duration = 0.0;
     for item in &director.timeline {
         let end = item.start_time + item.duration;
-        if end > max_duration { max_duration = end; }
+        if end > max_duration {
+            max_duration = end;
+        }
     }
-    if max_duration == 0.0 { max_duration = 5.0; }
+    if max_duration == 0.0 {
+        max_duration = 5.0;
+    }
 
     let total_frames = (max_duration * fps as f64).ceil() as usize;
 
@@ -91,12 +100,16 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
         );
     }
 
-    let mut surface = surface.or_else(|| {
-        skia_safe::surfaces::raster(&info, None, None)
-    }).ok_or(RenderError::SurfaceFailure)?;
+    let mut surface = surface
+        .or_else(|| skia_safe::surfaces::raster(&info, None, None))
+        .ok_or(RenderError::SurfaceFailure)?;
 
     let mut accumulation_surface = if director.samples_per_frame > 1 {
-        Some(surface.new_surface(&info).ok_or(RenderError::SurfaceFailure)?)
+        Some(
+            surface
+                .new_surface(&info)
+                .ok_or(RenderError::SurfaceFailure)?,
+        )
     } else {
         None
     };
@@ -116,119 +129,184 @@ pub fn render_export(director: &mut Director, out_path: PathBuf, gpu_context: Op
         let frame_start_time = i as f64 / fps as f64;
         let shutter_start_time = frame_start_time - (shutter_duration / 2.0);
 
-        let mut render_at_time = |director: &mut Director, layout_engine: &mut LayoutEngine, time: f64, canvas: &skia_safe::Canvas| -> Result<(), RenderError> {
-             director.update(time);
-             layout_engine.compute_layout(&mut director.scene, director.width, director.height, time);
-             director.run_post_layout(time);
+        let mut render_at_time = |director: &mut Director,
+                                  layout_engine: &mut LayoutEngine,
+                                  time: f64,
+                                  canvas: &skia_safe::Canvas|
+         -> Result<(), RenderError> {
+            director.update(time);
+            layout_engine.compute_layout(
+                &mut director.scene,
+                director.width,
+                director.height,
+                time,
+            );
+            director.run_post_layout(time);
 
-             let assets_ref = &director.assets;
+            let assets_ref = &director.assets;
 
-             canvas.clear(skia_safe::Color::BLACK);
+            canvas.clear(skia_safe::Color::BLACK);
 
-             // Check transition
-             let transition = director.transitions.iter().find(|t| time >= t.start_time && time < t.start_time + t.duration).cloned();
+            // Check transition
+            let transition = director
+                .transitions
+                .iter()
+                .find(|t| time >= t.start_time && time < t.start_time + t.duration)
+                .cloned();
 
-             // Collect items. Need indices to match with transition.
-             let mut items: Vec<(usize, TimelineItem)> = director.timeline.iter().cloned().enumerate()
-                 .filter(|(_, item)| time >= item.start_time && time < item.start_time + item.duration)
-                 .collect();
-             items.sort_by_key(|(_, item)| item.z_index);
+            // Collect items. Need indices to match with transition.
+            let mut items: Vec<(usize, TimelineItem)> = director
+                .timeline
+                .iter()
+                .cloned()
+                .enumerate()
+                .filter(|(_, item)| {
+                    time >= item.start_time && time < item.start_time + item.duration
+                })
+                .collect();
+            items.sort_by_key(|(_, item)| item.z_index);
 
-             if let Some(trans) = transition {
-                 let mut drawn_transition = false;
+            if let Some(trans) = transition {
+                let mut drawn_transition = false;
 
-                 for (idx, item) in items {
-                     if idx == trans.from_scene_idx || idx == trans.to_scene_idx {
-                         if !drawn_transition {
-                             let info = skia_safe::ImageInfo::new(
+                for (idx, item) in items {
+                    if idx == trans.from_scene_idx || idx == trans.to_scene_idx {
+                        if !drawn_transition {
+                            let info = skia_safe::ImageInfo::new(
                                 (director.width, director.height),
                                 ColorType::RGBA8888,
                                 AlphaType::Premul,
                                 Some(ColorSpace::new_srgb()),
-                             );
+                            );
 
-                             if let (Some(mut surf_a), Some(mut surf_b)) = (skia_safe::surfaces::raster(&info, None, None), skia_safe::surfaces::raster(&info, None, None)) {
-                                 // Render A & B
-                                 if let (Some(item_a), Some(item_b)) = (director.timeline.get(trans.from_scene_idx), director.timeline.get(trans.to_scene_idx)) {
-                                     render_recursive(&director.scene, assets_ref, item_a.scene_root, surf_a.canvas(), 1.0)?;
-                                     render_recursive(&director.scene, assets_ref, item_b.scene_root, surf_b.canvas(), 1.0)?;
+                            if let (Some(mut surf_a), Some(mut surf_b)) = (
+                                skia_safe::surfaces::raster(&info, None, None),
+                                skia_safe::surfaces::raster(&info, None, None),
+                            ) {
+                                // Render A & B
+                                if let (Some(item_a), Some(item_b)) = (
+                                    director.timeline.get(trans.from_scene_idx),
+                                    director.timeline.get(trans.to_scene_idx),
+                                ) {
+                                    render_recursive(
+                                        &director.scene,
+                                        assets_ref,
+                                        item_a.scene_root,
+                                        surf_a.canvas(),
+                                        1.0,
+                                    )?;
+                                    render_recursive(
+                                        &director.scene,
+                                        assets_ref,
+                                        item_b.scene_root,
+                                        surf_b.canvas(),
+                                        1.0,
+                                    )?;
 
-                                     let img_a = surf_a.image_snapshot();
-                                     let img_b = surf_b.image_snapshot();
+                                    let img_a = surf_a.image_snapshot();
+                                    let img_b = surf_b.image_snapshot();
 
-                                     let progress = ((time - trans.start_time) / trans.duration).clamp(0.0, 1.0) as f32;
-                                     let val = trans.easing.eval(progress);
+                                    let progress = ((time - trans.start_time) / trans.duration)
+                                        .clamp(0.0, 1.0)
+                                        as f32;
+                                    let val = trans.easing.eval(progress);
 
-                                     draw_transition(canvas, &img_a, &img_b, val, &trans.kind, director.width, director.height);
-                                 }
-                             }
-                             drawn_transition = true;
-                         }
-                     } else {
-                         render_recursive(&director.scene, assets_ref, item.scene_root, canvas, 1.0)?;
-                     }
-                 }
-             } else {
-                 for (_, item) in items {
-                     render_recursive(&director.scene, assets_ref, item.scene_root, canvas, 1.0)?;
-                 }
-             }
-             if time < 0.1 { debug!("[Frame] render complete"); }
-             Ok(())
+                                    draw_transition(
+                                        canvas,
+                                        &img_a,
+                                        &img_b,
+                                        val,
+                                        &trans.kind,
+                                        director.width,
+                                        director.height,
+                                    );
+                                }
+                            }
+                            drawn_transition = true;
+                        }
+                    } else {
+                        render_recursive(
+                            &director.scene,
+                            assets_ref,
+                            item.scene_root,
+                            canvas,
+                            1.0,
+                        )?;
+                    }
+                }
+            } else {
+                for (_, item) in items {
+                    render_recursive(&director.scene, assets_ref, item.scene_root, canvas, 1.0)?;
+                }
+            }
+            if time < 0.1 {
+                debug!("[Frame] render complete");
+            }
+            Ok(())
         };
 
         if samples == 1 {
-            render_at_time(director, &mut layout_engine, frame_start_time, surface.canvas())?;
+            render_at_time(
+                director,
+                &mut layout_engine,
+                frame_start_time,
+                surface.canvas(),
+            )?;
         } else {
-             let scratch_surface = accumulation_surface.as_mut().unwrap();
+            let scratch_surface = accumulation_surface.as_mut().unwrap();
 
-             for s in 0..samples {
-                 let t_offset = if samples > 1 {
-                     (s as f64 / (samples - 1) as f64) * shutter_duration
-                 } else {
-                     0.0
-                 };
-                 let sample_time = shutter_start_time + t_offset;
+            for s in 0..samples {
+                let t_offset = if samples > 1 {
+                    (s as f64 / (samples - 1) as f64) * shutter_duration
+                } else {
+                    0.0
+                };
+                let sample_time = shutter_start_time + t_offset;
 
-                 // Clear handled by render_at_time
-                 render_at_time(director, &mut layout_engine, sample_time, scratch_surface.canvas())?;
+                // Clear handled by render_at_time
+                render_at_time(
+                    director,
+                    &mut layout_engine,
+                    sample_time,
+                    scratch_surface.canvas(),
+                )?;
 
-                 let weight = 1.0 / (s as f32 + 1.0);
-                 let mut paint = skia_safe::Paint::default();
-                 paint.set_alpha_f(weight);
-                 let image = scratch_surface.image_snapshot();
+                let weight = 1.0 / (s as f32 + 1.0);
+                let mut paint = skia_safe::Paint::default();
+                paint.set_alpha_f(weight);
+                let image = scratch_surface.image_snapshot();
 
-                 if s == 0 {
-                     surface.canvas().clear(skia_safe::Color::BLACK);
-                 }
-                 surface.canvas().draw_image(&image, (0, 0), Some(&paint));
-             }
+                if s == 0 {
+                    surface.canvas().clear(skia_safe::Color::BLACK);
+                }
+                surface.canvas().draw_image(&image, (0, 0), Some(&paint));
+            }
         }
 
         if let Some(pixmap) = surface.peek_pixels() {
-             if let Some(bytes) = pixmap.bytes() {
-                 let frame_shape = (height as usize, width as usize, 4);
-                 // Safety: check size
-                 if bytes.len() == width as usize * height as usize * 4 {
+            if let Some(bytes) = pixmap.bytes() {
+                let frame_shape = (height as usize, width as usize, 4);
+                // Safety: check size
+                if bytes.len() == width as usize * height as usize * 4 {
                     let vec_bytes = bytes.to_vec();
                     let frame = Array3::from_shape_vec(frame_shape, vec_bytes)?;
                     encoder.encode(&frame, Time::from_secs_f64(i as f64 / fps as f64))?;
-                 }
-             }
+                }
+            }
         } else {
-             let mut bytes = Vec::with_capacity((width * height * 4) as usize);
-             bytes.resize((width * height * 4) as usize, 0);
-              let info = skia_safe::ImageInfo::new(
+            let mut bytes = Vec::with_capacity((width * height * 4) as usize);
+            bytes.resize((width * height * 4) as usize, 0);
+            let info = skia_safe::ImageInfo::new(
                 (width, height),
                 ColorType::RGBA8888,
                 AlphaType::Premul,
-                None
-             );
-             if surface.read_pixels(&info, &mut bytes, (width * 4) as usize, (0, 0)) {
-                 let frame_shape = (height as usize, width as usize, 4);
-                 let frame = Array3::from_shape_vec(frame_shape, bytes)?;
-                 encoder.encode(&frame, Time::from_secs_f64(i as f64 / fps as f64))?;
-             }
+                None,
+            );
+            if surface.read_pixels(&info, &mut bytes, (width * 4) as usize, (0, 0)) {
+                let frame_shape = (height as usize, width as usize, 4);
+                let frame = Array3::from_shape_vec(frame_shape, bytes)?;
+                encoder.encode(&frame, Time::from_secs_f64(i as f64 / fps as f64))?;
+            }
         }
 
         let audio_samples = director.mix_audio(samples_per_frame, frame_start_time);
@@ -248,114 +326,121 @@ pub fn render_recursive(
     assets: &AssetManager,
     node_id: NodeId,
     canvas: &skia_safe::Canvas,
-    parent_opacity: f32
+    parent_opacity: f32,
 ) -> Result<(), RenderError> {
     if let Some(node) = scene.get_node(node_id) {
-         canvas.save();
+        canvas.save();
 
-         // Layout Position
-         let layout_x = node.layout_rect.left;
-         let layout_y = node.layout_rect.top;
+        // Layout Position
+        let layout_x = node.layout_rect.left;
+        let layout_y = node.layout_rect.top;
 
-         // Transform Properties
-         let tx = node.transform.translate_x.current_value;
-         let ty = node.transform.translate_y.current_value;
-         let scale_x = node.transform.scale_x.current_value;
-         let scale_y = node.transform.scale_y.current_value;
-         let rotation = node.transform.rotation.current_value;
-         let skew_x = node.transform.skew_x.current_value;
-         let skew_y = node.transform.skew_y.current_value;
+        // Transform Properties
+        let tx = node.transform.translate_x.current_value;
+        let ty = node.transform.translate_y.current_value;
+        let scale_x = node.transform.scale_x.current_value;
+        let scale_y = node.transform.scale_y.current_value;
+        let rotation = node.transform.rotation.current_value;
+        let skew_x = node.transform.skew_x.current_value;
+        let skew_y = node.transform.skew_y.current_value;
 
-         // Pivot Calculation (absolute)
-         let pivot_x = node.layout_rect.width() * node.transform.pivot_x;
-         let pivot_y = node.layout_rect.height() * node.transform.pivot_y;
+        // Pivot Calculation (absolute)
+        let pivot_x = node.layout_rect.width() * node.transform.pivot_x;
+        let pivot_y = node.layout_rect.height() * node.transform.pivot_y;
 
-         // Apply Transform Stack
-         // 1. Move to position
-         canvas.translate((layout_x + tx, layout_y + ty));
+        // Apply Transform Stack
+        // 1. Move to position
+        canvas.translate((layout_x + tx, layout_y + ty));
 
-         // 2. Move to pivot
-         canvas.translate((pivot_x, pivot_y));
+        // 2. Move to pivot
+        canvas.translate((pivot_x, pivot_y));
 
-         // 3. Rotate
-         canvas.rotate(rotation, None);
+        // 3. Rotate
+        canvas.rotate(rotation, None);
 
-         // 4. Scale
-         canvas.scale((scale_x, scale_y));
+        // 4. Scale
+        canvas.scale((scale_x, scale_y));
 
-         // 5. Skew (Degrees to Tangent)
-         let tan_skew_x = skew_x.to_radians().tan();
-         let tan_skew_y = skew_y.to_radians().tan();
-         canvas.skew((tan_skew_x, tan_skew_y));
+        // 5. Skew (Degrees to Tangent)
+        let tan_skew_x = skew_x.to_radians().tan();
+        let tan_skew_y = skew_y.to_radians().tan();
+        canvas.skew((tan_skew_x, tan_skew_y));
 
-         // 6. Move back from pivot
-         canvas.translate((-pivot_x, -pivot_y));
+        // 6. Move back from pivot
+        canvas.translate((-pivot_x, -pivot_y));
 
-         let local_rect = skia_safe::Rect::from_wh(node.layout_rect.width(), node.layout_rect.height());
+        let local_rect =
+            skia_safe::Rect::from_wh(node.layout_rect.width(), node.layout_rect.height());
 
-         let mut last_error = Ok(());
-         let mut draw_children = |canvas: &skia_safe::Canvas| {
-             // Z-Index Sorting
-             let mut sorted_children: Vec<(NodeId, i32)> = Vec::with_capacity(node.children.len());
-             for &child_id in &node.children {
-                 if let Some(child) = scene.get_node(child_id) {
-                     sorted_children.push((child_id, child.z_index));
-                 }
-             }
-             sorted_children.sort_by_key(|k| k.1);
+        let mut last_error = Ok(());
+        let mut draw_children = |canvas: &skia_safe::Canvas| {
+            // Z-Index Sorting
+            let mut sorted_children: Vec<(NodeId, i32)> = Vec::with_capacity(node.children.len());
+            for &child_id in &node.children {
+                if let Some(child) = scene.get_node(child_id) {
+                    sorted_children.push((child_id, child.z_index));
+                }
+            }
+            sorted_children.sort_by_key(|k| k.1);
 
-             for (child_id, _) in sorted_children {
-                 if let Err(e) = render_recursive(scene, assets, child_id, canvas, parent_opacity) {
-                     last_error = Err(e);
-                 }
-             }
-         };
+            for (child_id, _) in sorted_children {
+                if let Err(e) = render_recursive(scene, assets, child_id, canvas, parent_opacity) {
+                    last_error = Err(e);
+                }
+            }
+        };
 
-         // Check if we need a save layer for blending or masking
-         let need_layer = node.mask_node.is_some() || node.blend_mode != skia_safe::BlendMode::SrcOver;
+        // Check if we need a save layer for blending or masking
+        let need_layer =
+            node.mask_node.is_some() || node.blend_mode != skia_safe::BlendMode::SrcOver;
 
-         let result = if need_layer {
-             let mut paint = skia_safe::Paint::default();
-             paint.set_blend_mode(node.blend_mode);
+        let result = if need_layer {
+            let mut paint = skia_safe::Paint::default();
+            paint.set_blend_mode(node.blend_mode);
 
-             // Create an isolated layer.
-             // If we have a mask, we need to ensure the content is drawn, then the mask is drawn with DstIn.
-             // This layer acts as the composition group.
-             canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&paint));
+            // Create an isolated layer.
+            // If we have a mask, we need to ensure the content is drawn, then the mask is drawn with DstIn.
+            // This layer acts as the composition group.
+            canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&paint));
 
-             let r = node.element.render(canvas, local_rect, parent_opacity, &mut draw_children);
+            let r = node
+                .element
+                .render(canvas, local_rect, parent_opacity, &mut draw_children);
 
-             if r.is_ok() && last_error.is_ok() {
-                 if let Some(mask_id) = node.mask_node {
-                     let mut mask_paint = skia_safe::Paint::default();
-                     mask_paint.set_blend_mode(skia_safe::BlendMode::DstIn);
+            if r.is_ok() && last_error.is_ok() {
+                if let Some(mask_id) = node.mask_node {
+                    let mut mask_paint = skia_safe::Paint::default();
+                    mask_paint.set_blend_mode(skia_safe::BlendMode::DstIn);
 
-                     // Create a layer for the mask, which will composite onto the content with DstIn
-                     canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&mask_paint));
-                     if let Err(e) = render_recursive(scene, assets, mask_id, canvas, 1.0) {
-                         last_error = Err(e);
-                     }
-                     canvas.restore();
-                 }
-             }
+                    // Create a layer for the mask, which will composite onto the content with DstIn
+                    canvas
+                        .save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&mask_paint));
+                    if let Err(e) = render_recursive(scene, assets, mask_id, canvas, 1.0) {
+                        last_error = Err(e);
+                    }
+                    canvas.restore();
+                }
+            }
 
-             canvas.restore();
-             r
-         } else {
-             node.element.render(canvas, local_rect, parent_opacity, &mut draw_children)
-         };
+            canvas.restore();
+            r
+        } else {
+            node.element
+                .render(canvas, local_rect, parent_opacity, &mut draw_children)
+        };
 
-         canvas.restore();
+        canvas.restore();
 
-         result?;
-         last_error?;
+        result?;
+        last_error?;
     }
     Ok(())
 }
 
 fn get_transition_shader(kind: &TransitionType) -> &'static str {
     match kind {
-        TransitionType::Fade => r#"
+        TransitionType::Fade => {
+            r#"
             uniform shader imageA;
             uniform shader imageB;
             uniform float progress;
@@ -364,8 +449,10 @@ fn get_transition_shader(kind: &TransitionType) -> &'static str {
                 half4 colorB = imageB.eval(p);
                 return mix(colorA, colorB, progress);
             }
-        "#,
-        TransitionType::SlideLeft => r#"
+        "#
+        }
+        TransitionType::SlideLeft => {
+            r#"
             uniform shader imageA;
             uniform shader imageB;
             uniform float progress;
@@ -378,8 +465,10 @@ fn get_transition_shader(kind: &TransitionType) -> &'static str {
                     return imageB.eval(float2(p.x - (resolution.x - x_offset), p.y));
                 }
             }
-        "#,
-        TransitionType::SlideRight => r#"
+        "#
+        }
+        TransitionType::SlideRight => {
+            r#"
             uniform shader imageA;
             uniform shader imageB;
             uniform float progress;
@@ -392,8 +481,10 @@ fn get_transition_shader(kind: &TransitionType) -> &'static str {
                     return imageB.eval(float2(p.x - x_offset + resolution.x, p.y));
                 }
             }
-        "#,
-        TransitionType::WipeLeft => r#"
+        "#
+        }
+        TransitionType::WipeLeft => {
+            r#"
             uniform shader imageA;
             uniform shader imageB;
             uniform float progress;
@@ -406,8 +497,10 @@ fn get_transition_shader(kind: &TransitionType) -> &'static str {
                      return imageB.eval(p);
                  }
             }
-        "#,
-        TransitionType::WipeRight => r#"
+        "#
+        }
+        TransitionType::WipeRight => {
+            r#"
             uniform shader imageA;
             uniform shader imageB;
             uniform float progress;
@@ -420,8 +513,10 @@ fn get_transition_shader(kind: &TransitionType) -> &'static str {
                      return imageB.eval(p);
                  }
             }
-        "#,
-        TransitionType::CircleOpen => r#"
+        "#
+        }
+        TransitionType::CircleOpen => {
+            r#"
             uniform shader imageA;
             uniform shader imageB;
             uniform float progress;
@@ -437,7 +532,8 @@ fn get_transition_shader(kind: &TransitionType) -> &'static str {
                     return imageA.eval(p);
                 }
             }
-        "#,
+        "#
+        }
     }
 }
 
@@ -453,31 +549,38 @@ fn draw_transition(
     let sksl = get_transition_shader(kind);
     let result = RuntimeEffect::make_for_shader(sksl, None);
     if let Ok(effect) = result {
-         let mut uniform_bytes = Vec::new();
-         uniform_bytes.extend_from_slice(&progress.to_le_bytes());
+        let mut uniform_bytes = Vec::new();
+        uniform_bytes.extend_from_slice(&progress.to_le_bytes());
 
-         match kind {
-             TransitionType::Fade => {},
-             _ => {
-                 uniform_bytes.extend_from_slice(&(width as f32).to_le_bytes());
-                 uniform_bytes.extend_from_slice(&(height as f32).to_le_bytes());
-             }
-         }
+        match kind {
+            TransitionType::Fade => {}
+            _ => {
+                uniform_bytes.extend_from_slice(&(width as f32).to_le_bytes());
+                uniform_bytes.extend_from_slice(&(height as f32).to_le_bytes());
+            }
+        }
 
-         let uniforms_data = Data::new_copy(&uniform_bytes);
+        let uniforms_data = Data::new_copy(&uniform_bytes);
 
-         let shader_a = img_a.to_shader(None, skia_safe::SamplingOptions::default(), None).unwrap();
-         let shader_b = img_b.to_shader(None, skia_safe::SamplingOptions::default(), None).unwrap();
+        let shader_a = img_a
+            .to_shader(None, skia_safe::SamplingOptions::default(), None)
+            .unwrap();
+        let shader_b = img_b
+            .to_shader(None, skia_safe::SamplingOptions::default(), None)
+            .unwrap();
 
-         let children = [ChildPtr::Shader(shader_a), ChildPtr::Shader(shader_b)];
+        let children = [ChildPtr::Shader(shader_a), ChildPtr::Shader(shader_b)];
 
-         if let Some(shader) = effect.make_shader(uniforms_data, &children, None) {
-             let mut paint = skia_safe::Paint::default();
-             paint.set_shader(Some(shader));
-             canvas.draw_rect(skia_safe::Rect::from_wh(width as f32, height as f32), &paint);
-         } else {
-             error!("Failed to make shader");
-         }
+        if let Some(shader) = effect.make_shader(uniforms_data, &children, None) {
+            let mut paint = skia_safe::Paint::default();
+            paint.set_shader(Some(shader));
+            canvas.draw_rect(
+                skia_safe::Rect::from_wh(width as f32, height as f32),
+                &paint,
+            );
+        } else {
+            error!("Failed to make shader");
+        }
     } else {
         error!("Shader compilation error: {:?}", result.err());
     }
@@ -486,23 +589,31 @@ fn draw_transition(
 /// Renders a single frame at a specific timestamp to the provided canvas.
 ///
 /// This is helpful for debugging or generating static previews without running the full export loop.
-pub fn render_frame(director: &mut Director, time: f64, canvas: &skia_safe::Canvas) -> Result<(), RenderError> {
-     let mut layout_engine = LayoutEngine::new();
-     director.update(time);
-     layout_engine.compute_layout(&mut director.scene, director.width, director.height, time);
-     director.run_post_layout(time);
+pub fn render_frame(
+    director: &mut Director,
+    time: f64,
+    canvas: &skia_safe::Canvas,
+) -> Result<(), RenderError> {
+    let mut layout_engine = LayoutEngine::new();
+    director.update(time);
+    layout_engine.compute_layout(&mut director.scene, director.width, director.height, time);
+    director.run_post_layout(time);
 
-     let assets = &director.assets;
+    let assets = &director.assets;
 
-     canvas.clear(skia_safe::Color::BLACK);
+    canvas.clear(skia_safe::Color::BLACK);
 
-     let mut items: Vec<(usize, TimelineItem)> = director.timeline.iter().cloned().enumerate()
-         .filter(|(_, item)| time >= item.start_time && time < item.start_time + item.duration)
-         .collect();
-     items.sort_by_key(|(_, item)| item.z_index);
+    let mut items: Vec<(usize, TimelineItem)> = director
+        .timeline
+        .iter()
+        .cloned()
+        .enumerate()
+        .filter(|(_, item)| time >= item.start_time && time < item.start_time + item.duration)
+        .collect();
+    items.sort_by_key(|(_, item)| item.z_index);
 
-     for (_, item) in items {
-         render_recursive(&director.scene, assets, item.scene_root, canvas, 1.0)?;
-     }
-     Ok(())
+    for (_, item) in items {
+        render_recursive(&director.scene, assets, item.scene_root, canvas, 1.0)?;
+    }
+    Ok(())
 }

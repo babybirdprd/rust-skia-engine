@@ -12,13 +12,13 @@ use crate::AssetLoader;
 use rhai::{Engine, Map, Module};
 use skia_safe::Path;
 use std::collections::HashMap;
-use tracing::error;
 use std::sync::{Arc, Mutex};
 use taffy::geometry::Rect;
 use taffy::style::{
     AlignItems, Dimension, FlexDirection, JustifyContent, LengthPercentage, LengthPercentageAuto,
     Style,
 };
+use tracing::error;
 
 /// Wrapper around `Director` for Rhai scripting.
 #[derive(Clone)]
@@ -1587,12 +1587,12 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
                     "translate_x" | "x" => {
                         n.transform
                             .translate_x
-                            .add_segment(start as f32, end as f32, dur, ease_fn)
+                            .add_segment(start as f32, end as f32, dur, ease_fn);
                     }
                     "translate_y" | "y" => {
                         n.transform
                             .translate_y
-                            .add_segment(start as f32, end as f32, dur, ease_fn)
+                            .add_segment(start as f32, end as f32, dur, ease_fn);
                     }
                     _ => {
                         n.element

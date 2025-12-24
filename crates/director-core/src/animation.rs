@@ -1,6 +1,6 @@
-use keyframe::{Keyframe, EasingFunction, AnimationSequence, CanTween};
+use keyframe::{AnimationSequence, CanTween, EasingFunction, Keyframe};
+use serde::{Deserialize, Serialize};
 use std::fmt;
-use serde::{Serialize, Deserialize};
 
 /// Supported easing functions for animations.
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -50,7 +50,12 @@ pub struct SpringConfig {
 impl Default for SpringConfig {
     fn default() -> Self {
         // "Wobbly" default for visibility
-        Self { stiffness: 100.0, damping: 10.0, mass: 1.0, velocity: 0.0 }
+        Self {
+            stiffness: 100.0,
+            damping: 10.0,
+            mass: 1.0,
+            velocity: 0.0,
+        }
     }
 }
 
@@ -82,7 +87,8 @@ impl CanTween for TweenableVector {
 /// A generic animated value that tracks keyframes and current state.
 #[derive(Clone)]
 pub struct Animated<T>
-where T: Clone + keyframe::CanTween + Default
+where
+    T: Clone + keyframe::CanTween + Default,
 {
     /// Raw storage of keyframes (value, absolute_time, easing).
     pub raw_keyframes: Vec<(T, f64, EasingType)>,
@@ -93,7 +99,8 @@ where T: Clone + keyframe::CanTween + Default
 }
 
 impl<T> Animated<T>
-where T: Clone + keyframe::CanTween + Default
+where
+    T: Clone + keyframe::CanTween + Default,
 {
     /// Creates a new animated value with an initial state and no motion.
     pub fn new(initial: T) -> Self {
@@ -120,10 +127,10 @@ where T: Clone + keyframe::CanTween + Default
         self.raw_keyframes.push((target.clone(), new_time, easing));
 
         // Rebuild sequence
-        let frames: Vec<Keyframe<T>> = self.raw_keyframes.iter()
-            .map(|(val, time, ease_type)| {
-                Keyframe::new(val.clone(), *time, *ease_type)
-            })
+        let frames: Vec<Keyframe<T>> = self
+            .raw_keyframes
+            .iter()
+            .map(|(val, time, ease_type)| Keyframe::new(val.clone(), *time, *ease_type))
             .collect();
 
         self.sequence = AnimationSequence::from(frames);
@@ -139,11 +146,11 @@ where T: Clone + keyframe::CanTween + Default
     /// Useful for stringing together unrelated movements (e.g. "move from A to B" then later "move from C to D").
     pub fn add_segment(&mut self, start: T, target: T, duration: f64, easing: EasingType) {
         if self.sequence.duration() == 0.0 {
-             // If no animation exists yet, treat start as the initial value
-             *self = Self::new(start);
+            // If no animation exists yet, treat start as the initial value
+            *self = Self::new(start);
         } else {
-             // If animation exists, we jump to 'start' immediately at the current end time
-             self.add_keyframe(start, 0.0, EasingType::Linear);
+            // If animation exists, we jump to 'start' immediately at the current end time
+            self.add_keyframe(start, 0.0, EasingType::Linear);
         }
         self.add_keyframe(target, duration, easing);
     }
@@ -173,22 +180,22 @@ impl Animated<f32> {
     pub fn add_spring_with_start(&mut self, start: f32, target: f32, config: SpringConfig) {
         // If start is different from last keyframe, we insert a jump
         if let Some(last) = self.raw_keyframes.last() {
-             if (last.0 - start).abs() > 0.0001 {
-                  self.add_keyframe(start, 0.0, EasingType::Linear);
-             }
+            if (last.0 - start).abs() > 0.0001 {
+                self.add_keyframe(start, 0.0, EasingType::Linear);
+            }
         } else {
-             // Should verify if this ever happens as ::new sets a keyframe
-             *self = Self::new(start);
+            // Should verify if this ever happens as ::new sets a keyframe
+            *self = Self::new(start);
         }
 
         let frames = solve_spring(start, target, config);
 
         let mut previous_time = 0.0;
         for (value, time) in frames {
-             let dt = time - previous_time;
-             // dt is f64, time is f64
-             self.add_keyframe(value, dt, EasingType::Linear);
-             previous_time = time;
+            let dt = time - previous_time;
+            // dt is f64, time is f64
+            self.add_keyframe(value, dt, EasingType::Linear);
+            previous_time = time;
         }
     }
 }
@@ -220,9 +227,12 @@ fn solve_spring(start: f32, end: f32, config: SpringConfig) -> Vec<(f32, f64)> {
 
         frames.push((current, t));
 
-        if t > max_duration as f64 { break; }
+        if t > max_duration as f64 {
+            break;
+        }
 
-        let is_settled = (current - end).abs() < position_epsilon && velocity.abs() < velocity_epsilon;
+        let is_settled =
+            (current - end).abs() < position_epsilon && velocity.abs() < velocity_epsilon;
         if is_settled {
             // Add one final frame exactly at target to ensure we land
             frames.push((end, t + dt as f64));
@@ -233,11 +243,12 @@ fn solve_spring(start: f32, end: f32, config: SpringConfig) -> Vec<(f32, f64)> {
 }
 
 impl<T> fmt::Debug for Animated<T>
-where T: Clone + keyframe::CanTween + Default + fmt::Debug
+where
+    T: Clone + keyframe::CanTween + Default + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Animated")
-         .field("current_value", &self.current_value)
-         .finish()
+            .field("current_value", &self.current_value)
+            .finish()
     }
 }

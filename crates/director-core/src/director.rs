@@ -1,16 +1,16 @@
 // use rayon::prelude::*; // Rayon disabled due to Taffy !Send
-use skia_safe::PathMeasure;
 use crate::animation::EasingType;
-use crate::AssetLoader;
 use crate::audio::{AudioMixer, AudioTrack};
-use crate::video_wrapper::RenderMode;
-use crate::types::NodeId;
-use crate::systems::assets::AssetManager;
 use crate::scene::SceneGraph;
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
-use skia_safe::{Data, FontMgr};
+use crate::systems::assets::AssetManager;
+use crate::types::NodeId;
+use crate::video_wrapper::RenderMode;
+use crate::AssetLoader;
 use skia_safe::textlayout::{FontCollection, TypefaceFontProvider};
+use skia_safe::PathMeasure;
+use skia_safe::{Data, FontMgr};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tracing::instrument;
 
 /// Shared resources context that can be passed between Directors (e.g. for sub-compositions).
@@ -96,8 +96,14 @@ impl Director {
     /// * `asset_loader` - Implementation of asset loading strategy.
     /// * `render_mode` - Mode hint (e.g. Preview vs Export).
     /// * `context` - Optional existing context (for nested compositions).
-    pub fn new(width: i32, height: i32, fps: u32, asset_loader: Arc<dyn AssetLoader>, render_mode: RenderMode, context: Option<DirectorContext>) -> Self {
-
+    pub fn new(
+        width: i32,
+        height: i32,
+        fps: u32,
+        asset_loader: Arc<dyn AssetLoader>,
+        render_mode: RenderMode,
+        context: Option<DirectorContext>,
+    ) -> Self {
         let assets = if let Some(ctx) = context {
             ctx.assets
         } else {
@@ -109,12 +115,12 @@ impl Director {
 
             // Load fallback font (e.g. Emoji) if available
             if let Some(bytes) = asset_loader.load_font_fallback() {
-                 let data = Data::new_copy(&bytes);
-                 // We need to register the typeface with an alias if possible,
-                 // or just register it. TypefaceFontProvider::register_typeface returns usize.
-                 if let Some(typeface) = FontMgr::new().new_from_data(&data, 0) {
-                     font_provider.register_typeface(typeface, Some("Fallback"));
-                 }
+                let data = Data::new_copy(&bytes);
+                // We need to register the typeface with an alias if possible,
+                // or just register it. TypefaceFontProvider::register_typeface returns usize.
+                if let Some(typeface) = FontMgr::new().new_from_data(&data, 0) {
+                    font_provider.register_typeface(typeface, Some("Fallback"));
+                }
             }
 
             // Connect provider to collection
@@ -152,10 +158,10 @@ impl Director {
         // Traverse active scenes
         let mut active_roots = Vec::new();
         for item in &self.timeline {
-             if time >= item.start_time && time < item.start_time + item.duration {
-                 let local_time = time - item.start_time;
-                 active_roots.push((item.scene_root, local_time));
-             }
+            if time >= item.start_time && time < item.start_time + item.duration {
+                let local_time = time - item.start_time;
+                active_roots.push((item.scene_root, local_time));
+            }
         }
 
         let mut stack = Vec::new();
@@ -164,25 +170,29 @@ impl Director {
         }
 
         while let Some((id, local_time)) = stack.pop() {
-             // We access nodes directly to avoid self borrow issues with get_node if we were using &mut self methods
-             // But here we need to read nodes.
-             if id < self.scene.nodes.len() {
-                 if let Some(node) = &self.scene.nodes[id] {
-                     // Check audio
-                     if let Some(samples) = node.element.get_audio(local_time, samples_needed, self.audio_mixer.sample_rate) {
-                         for (i, val) in samples.iter().enumerate() {
-                             if i < output.len() {
-                                 output[i] += val;
-                             }
-                         }
-                     }
+            // We access nodes directly to avoid self borrow issues with get_node if we were using &mut self methods
+            // But here we need to read nodes.
+            if id < self.scene.nodes.len() {
+                if let Some(node) = &self.scene.nodes[id] {
+                    // Check audio
+                    if let Some(samples) = node.element.get_audio(
+                        local_time,
+                        samples_needed,
+                        self.audio_mixer.sample_rate,
+                    ) {
+                        for (i, val) in samples.iter().enumerate() {
+                            if i < output.len() {
+                                output[i] += val;
+                            }
+                        }
+                    }
 
-                     // Children
-                     for child_id in &node.children {
-                         stack.push((*child_id, local_time));
-                     }
-                 }
-             }
+                    // Children
+                    for child_id in &node.children {
+                        stack.push((*child_id, local_time));
+                    }
+                }
+            }
         }
 
         // Clamp
@@ -226,10 +236,10 @@ impl Director {
         // Pass 1: Mark active nodes and set local time
         let mut active_roots = Vec::new();
         for item in &self.timeline {
-             if global_time >= item.start_time && global_time < item.start_time + item.duration {
-                 let local_time = global_time - item.start_time;
-                 active_roots.push((item.scene_root, local_time));
-             }
+            if global_time >= item.start_time && global_time < item.start_time + item.duration {
+                let local_time = global_time - item.start_time;
+                active_roots.push((item.scene_root, local_time));
+            }
         }
 
         let mut stack = Vec::new();
@@ -238,8 +248,12 @@ impl Director {
         }
 
         while let Some((id, time)) = stack.pop() {
-            if id >= self.scene.nodes.len() { continue; }
-            if self.scene.nodes[id].is_none() { continue; }
+            if id >= self.scene.nodes.len() {
+                continue;
+            }
+            if self.scene.nodes[id].is_none() {
+                continue;
+            }
 
             let node = self.scene.nodes[id].as_mut().unwrap();
 
@@ -281,8 +295,8 @@ impl Director {
                         let length = measure.length();
                         let dist = path_anim.progress.current_value * length;
                         if let Some((p, _tangent)) = measure.pos_tan(dist) {
-                             node.transform.translate_x.current_value = p.x;
-                             node.transform.translate_y.current_value = p.y;
+                            node.transform.translate_x.current_value = p.x;
+                            node.transform.translate_y.current_value = p.y;
                         }
                     }
                 }

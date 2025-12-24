@@ -117,12 +117,12 @@ mod real {
                 .format()
                 .flags()
                 .contains(format::flag::Flags::GLOBAL_HEADER);
-            
+
             // Log which encoder we're using
-            let codec_v = codec::encoder::find(codec::Id::H264)
-                .ok_or(anyhow::anyhow!("H264 not found"))?;
+            let codec_v =
+                codec::encoder::find(codec::Id::H264).ok_or(anyhow::anyhow!("H264 not found"))?;
             tracing::info!("[Encoder] Using codec: H264 (software)");
-            
+
             let mut v_encoder = codec::context::Context::new_with_codec(codec_v)
                 .encoder()
                 .video()?;
@@ -252,7 +252,8 @@ mod real {
             } else {
                 for y in 0..h {
                     let src_row = &src[y * width_bytes..(y + 1) * width_bytes];
-                    let dest_row = &mut self.rgba_frame.data_mut(0)[y * stride..y * stride + width_bytes];
+                    let dest_row =
+                        &mut self.rgba_frame.data_mut(0)[y * stride..y * stride + width_bytes];
                     dest_row.copy_from_slice(src_row);
                 }
             }
@@ -510,7 +511,10 @@ mod real {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.debug_struct("SyncDecoder")
                 .field("current_time", &self.current_time)
-                .field("last_frame", &self.last_frame.as_ref().map(|(t, _, w, h)| (*t, *w, *h)))
+                .field(
+                    "last_frame",
+                    &self.last_frame.as_ref().map(|(t, _, w, h)| (*t, *w, *h)),
+                )
                 .finish()
         }
     }
@@ -549,10 +553,10 @@ mod real {
                         // Check if we reached target
                         // We accept frames that are equal or slightly after target
                         if t >= target_time - 0.01 {
-                             let shape_vec = frame.shape().to_vec();
-                             let shape = &shape_vec;
+                            let shape_vec = frame.shape().to_vec();
+                            let shape = &shape_vec;
 
-                             if shape.len() == 3 && shape[2] >= 3 {
+                            if shape.len() == 3 && shape[2] >= 3 {
                                 let h = shape[0] as u32;
                                 let w = shape[1] as u32;
                                 let (bytes, _) = frame.into_raw_vec_and_offset();
@@ -570,7 +574,7 @@ mod real {
                                 let result = (t, data, w, h);
                                 self.last_frame = Some(result.clone());
                                 return Ok(result);
-                             }
+                            }
                         }
 
                         if steps > max_steps {
@@ -732,11 +736,11 @@ pub mod mock {
             Ok(Self { last_time: 0.0 })
         }
         pub fn get_frame_at(&mut self, target_time: f64) -> Result<(f64, Vec<u8>, u32, u32)> {
-             // Simulate work
-             std::thread::sleep(std::time::Duration::from_millis(5));
-             self.last_time = target_time;
-             // Return dummy red frame
-             Ok((target_time, vec![255, 0, 0, 255], 1, 1))
+            // Simulate work
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            self.last_time = target_time;
+            // Return dummy red frame
+            Ok((target_time, vec![255, 0, 0, 255], 1, 1))
         }
     }
 

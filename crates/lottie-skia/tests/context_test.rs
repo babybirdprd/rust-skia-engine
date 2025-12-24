@@ -1,6 +1,4 @@
-use lottie_core::{
-    BlendMode, Image, NodeContent, RenderNode, RenderTree, Text,
-};
+use lottie_core::{BlendMode, Image, NodeContent, RenderNode, RenderTree, Text};
 use lottie_skia::{LottieContext, SkiaRenderer};
 use skia_safe::{Image as SkImage, Rect, Surface};
 use std::sync::{Arc, Mutex};
@@ -103,18 +101,18 @@ fn test_lottie_context_integration() {
     let mut surface = Surface::new_raster_n32_premul((100, 100)).unwrap();
     let canvas = surface.canvas();
 
-    SkiaRenderer::draw(
-        canvas,
-        &tree,
-        Rect::from_wh(100.0, 100.0),
-        1.0,
-        &ctx,
-    );
+    SkiaRenderer::draw(canvas, &tree, Rect::from_wh(100.0, 100.0), 1.0, &ctx);
 
     // 3. Verify calls
     let fonts = ctx.loaded_fonts.lock().unwrap();
     let images = ctx.loaded_images.lock().unwrap();
 
-    assert!(fonts.contains(&"CustomFont".to_string()), "Should have attempted to load 'CustomFont'");
-    assert!(images.contains(&"image_0".to_string()), "Should have attempted to load 'image_0'");
+    assert!(
+        fonts.contains(&"CustomFont".to_string()),
+        "Should have attempted to load 'CustomFont'"
+    );
+    assert!(
+        images.contains(&"image_0".to_string()),
+        "Should have attempted to load 'image_0'"
+    );
 }

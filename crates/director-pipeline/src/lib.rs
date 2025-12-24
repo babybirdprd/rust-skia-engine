@@ -1,13 +1,13 @@
-use director_core::{Director, AssetLoader, Element};
-use director_core::video_wrapper::RenderMode;
-use director_core::node::{BoxNode, TextNode, ImageNode};
-use director_core::element::{TextSpan};
+use director_core::animation::EasingType;
+use director_core::element::TextSpan;
+use director_core::node::{BoxNode, ImageNode, TextNode};
 use director_core::types::Color;
 use director_core::types::NodeId;
-use director_core::animation::EasingType;
-use director_schema::{MovieRequest, Node, NodeKind, StyleMap, TransformMap, Animation};
+use director_core::video_wrapper::RenderMode;
+use director_core::{AssetLoader, Director, Element};
+use director_schema::{Animation, MovieRequest, Node, NodeKind, StyleMap, TransformMap};
 use std::sync::Arc;
-use taffy::style::{Style, Dimension, FlexDirection, JustifyContent, AlignItems};
+use taffy::style::{AlignItems, Dimension, FlexDirection, JustifyContent, Style};
 
 /// Converts a Schema Request into a runnable Director instance.
 pub fn load_movie(request: MovieRequest, loader: Arc<dyn AssetLoader>) -> Director {
@@ -17,7 +17,7 @@ pub fn load_movie(request: MovieRequest, loader: Arc<dyn AssetLoader>) -> Direct
         request.fps,
         loader,
         RenderMode::Export,
-        None
+        None,
     );
 
     for scene_data in request.scenes {
@@ -25,18 +25,22 @@ pub fn load_movie(request: MovieRequest, loader: Arc<dyn AssetLoader>) -> Direct
         let root_id = build_node_recursive(&mut director, &scene_data.root);
 
         // Calculate start time based on previous scenes
-        let start_time = director.timeline.last()
+        let start_time = director
+            .timeline
+            .last()
             .map(|i| i.start_time + i.duration)
             .unwrap_or(0.0);
 
         // Add to timeline
-        director.timeline.push(director_core::director::TimelineItem {
-            scene_root: root_id,
-            start_time,
-            duration: scene_data.duration_secs,
-            z_index: 0,
-            audio_tracks: vec![],
-        });
+        director
+            .timeline
+            .push(director_core::director::TimelineItem {
+                scene_root: root_id,
+                start_time,
+                duration: scene_data.duration_secs,
+                z_index: 0,
+                audio_tracks: vec![],
+            });
     }
 
     director
@@ -49,7 +53,7 @@ fn build_node_recursive(director: &mut Director, node_def: &Node) -> NodeId {
             let mut b = BoxNode::new();
             b.border_radius = director_core::animation::Animated::new(*border_radius);
             Box::new(b)
-        },
+        }
         NodeKind::Text { content, font_size } => {
             // TextNode needs access to the AssetManager's font system
             let fc = director.assets.font_collection.clone();
@@ -63,13 +67,13 @@ fn build_node_recursive(director: &mut Director, node_def: &Node) -> NodeId {
 
             let t = TextNode::new(vec![span], fc);
             Box::new(t)
-        },
+        }
         NodeKind::Image { src } => {
             // Load bytes immediately (blocking for now)
             let bytes = director.assets.loader.load_bytes(src).unwrap_or_default();
             let img = ImageNode::new(bytes);
             Box::new(img)
-        },
+        }
         _ => Box::new(BoxNode::new()), // Fallback
     };
 
@@ -123,14 +127,18 @@ fn apply_animations(element: &mut Box<dyn Element>, animations: &[Animation]) {
             start_val,
             anim.end,
             anim.duration,
-            easing_str
+            easing_str,
         );
     }
 }
 
 fn apply_style_map(style: &mut Style, map: &StyleMap) {
-    if let Some(w) = &map.width { style.size.width = parse_dim(w); }
-    if let Some(h) = &map.height { style.size.height = parse_dim(h); }
+    if let Some(w) = &map.width {
+        style.size.width = parse_dim(w);
+    }
+    if let Some(h) = &map.height {
+        style.size.height = parse_dim(h);
+    }
 
     if let Some(d) = &map.flex_direction {
         style.flex_direction = match d.as_str() {
@@ -160,31 +168,52 @@ fn apply_style_map(style: &mut Style, map: &StyleMap) {
     // Padding
     if let Some(p) = map.padding {
         let d = taffy::style::LengthPercentage::length(p);
-        style.padding = taffy::geometry::Rect { left: d, right: d, top: d, bottom: d };
+        style.padding = taffy::geometry::Rect {
+            left: d,
+            right: d,
+            top: d,
+            bottom: d,
+        };
     }
 
     // Margin
     if let Some(m) = map.margin {
         let d = taffy::style::LengthPercentageAuto::length(m);
-        style.margin = taffy::geometry::Rect { left: d, right: d, top: d, bottom: d };
+        style.margin = taffy::geometry::Rect {
+            left: d,
+            right: d,
+            top: d,
+            bottom: d,
+        };
     }
 }
 
 fn apply_transform_map(transform: &mut director_core::types::Transform, map: &TransformMap) {
-    if let Some(v) = map.x { transform.translate_x = director_core::animation::Animated::new(v); }
-    if let Some(v) = map.y { transform.translate_y = director_core::animation::Animated::new(v); }
-    if let Some(v) = map.rotation { transform.rotation = director_core::animation::Animated::new(v); }
+    if let Some(v) = map.x {
+        transform.translate_x = director_core::animation::Animated::new(v);
+    }
+    if let Some(v) = map.y {
+        transform.translate_y = director_core::animation::Animated::new(v);
+    }
+    if let Some(v) = map.rotation {
+        transform.rotation = director_core::animation::Animated::new(v);
+    }
     if let Some(v) = map.scale {
         transform.scale_x = director_core::animation::Animated::new(v);
         transform.scale_y = director_core::animation::Animated::new(v);
     }
-    if let Some(v) = map.pivot_x { transform.pivot_x = v; }
-    if let Some(v) = map.pivot_y { transform.pivot_y = v; }
+    if let Some(v) = map.pivot_x {
+        transform.pivot_x = v;
+    }
+    if let Some(v) = map.pivot_y {
+        transform.pivot_y = v;
+    }
 }
 
 fn parse_dim(val: &str) -> Dimension {
-    if val == "auto" { Dimension::auto() }
-    else if val.ends_with("%") {
+    if val == "auto" {
+        Dimension::auto()
+    } else if val.ends_with("%") {
         let f = val.trim_end_matches("%").parse::<f32>().unwrap_or(0.0);
         Dimension::percent(f / 100.0)
     } else {

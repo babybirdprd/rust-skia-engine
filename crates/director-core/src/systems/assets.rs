@@ -1,8 +1,8 @@
+use crate::AssetLoader;
+use skia_safe::textlayout::{FontCollection, TypefaceFontProvider};
+use skia_safe::RuntimeEffect;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use skia_safe::RuntimeEffect;
-use skia_safe::textlayout::{FontCollection, TypefaceFontProvider};
-use crate::AssetLoader;
 
 /// Manages heavy shared resources (Fonts, Shaders, Asset Loading).
 ///

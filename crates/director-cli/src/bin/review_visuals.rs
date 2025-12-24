@@ -100,7 +100,8 @@ fn main() {
 fn generate_html_report(failures: &[String], failure_dir: &Path, snapshot_dir: &Path) {
     let report_path = failure_dir.parent().unwrap().join("visual_report.html");
 
-    let mut html = String::from(r#"
+    let mut html = String::from(
+        r#"
     <!DOCTYPE html>
     <html>
     <head>
@@ -117,7 +118,8 @@ fn generate_html_report(failures: &[String], failure_dir: &Path, snapshot_dir: &
     </head>
     <body>
         <h1>Visual Regression Failures</h1>
-    "#);
+    "#,
+    );
 
     for fail in failures {
         // We need relative paths for HTML if we want it to be portable, but absolute is easier for local dev.
@@ -131,7 +133,8 @@ fn generate_html_report(failures: &[String], failure_dir: &Path, snapshot_dir: &
         let actual_path = failure_dir.join(format!("{}_actual.png", fail));
         let expected_path = snapshot_dir.join(format!("{}.png", fail));
 
-        let block = format!(r#"
+        let block = format!(
+            r#"
         <div class="test-case">
             <h2>{}</h2>
             <div class="images">
@@ -150,10 +153,11 @@ fn generate_html_report(failures: &[String], failure_dir: &Path, snapshot_dir: &
             </div>
         </div>
         "#,
-        fail,
-        expected_path.to_string_lossy(),
-        actual_path.to_string_lossy(),
-        diff_path.to_string_lossy());
+            fail,
+            expected_path.to_string_lossy(),
+            actual_path.to_string_lossy(),
+            diff_path.to_string_lossy(),
+        );
 
         html.push_str(&block);
     }

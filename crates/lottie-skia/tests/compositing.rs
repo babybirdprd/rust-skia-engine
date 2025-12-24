@@ -8,8 +8,7 @@ use std::path::PathBuf;
 
 #[test]
 fn test_render_masks_and_mattes() {
-    let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/assets");
+    let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/assets");
 
     let json_path = assets_dir.join("text_reveal.json");
     let file = File::open(&json_path).expect("Failed to open JSON file: text_reveal.json");

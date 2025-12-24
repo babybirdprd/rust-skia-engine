@@ -65,9 +65,9 @@ pub mod tokens;
 /// Shared data structures used across the engine.
 pub mod types;
 
+pub mod errors;
 /// Core systems (Asset Management, etc.).
 pub mod systems;
-pub mod errors;
 
 pub use director::Director;
 pub use element::Element;
@@ -93,7 +93,9 @@ pub trait AssetLoader: Send + Sync {
     /// Optionally loads a fallback font (e.g., Emoji) to be used when glyphs are missing.
     ///
     /// The default implementation returns `None`.
-    fn load_font_fallback(&self) -> Option<Vec<u8>> { None }
+    fn load_font_fallback(&self) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 /// The default implementation of `AssetLoader` using the standard `std::fs` filesystem.
@@ -108,7 +110,15 @@ impl AssetLoader for DefaultAssetLoader {
         }
         // Fallback to assets/
         let alt = format!("assets/{}", path);
-        std::fs::read(&alt).map_err(|e| anyhow::anyhow!("Asset not found: {} (checked '{}' and '{}'): {}", path, path, alt, e))
+        std::fs::read(&alt).map_err(|e| {
+            anyhow::anyhow!(
+                "Asset not found: {} (checked '{}' and '{}'): {}",
+                path,
+                path,
+                alt,
+                e
+            )
+        })
     }
 
     /// Attempts to load an emoji font.
@@ -117,9 +127,9 @@ impl AssetLoader for DefaultAssetLoader {
     /// If not set, it checks for `assets/fonts/emoji.ttf` in the current directory.
     fn load_font_fallback(&self) -> Option<Vec<u8>> {
         if let Ok(path) = std::env::var("DIRECTOR_EMOJI_FONT") {
-             if let Ok(bytes) = std::fs::read(path) {
-                 return Some(bytes);
-             }
+            if let Ok(bytes) = std::fs::read(path) {
+                return Some(bytes);
+            }
         }
         // Default fallback path
         if let Ok(bytes) = std::fs::read("assets/fonts/emoji.ttf") {

@@ -1,6 +1,6 @@
+use lottie_data::model::LottieJson;
 use std::fs::File;
 use std::io::BufReader;
-use lottie_data::model::LottieJson;
 
 #[test]
 fn test_parse_heart_eyes() {

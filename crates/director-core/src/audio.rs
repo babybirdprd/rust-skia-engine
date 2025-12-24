@@ -1,12 +1,14 @@
-use anyhow::{Result, Context};
 use crate::animation::Animated;
+use anyhow::{Context, Result};
+use rubato::{
+    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+};
 use std::io::Cursor;
-use symphonia::core::io::MediaSourceStream;
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::formats::FormatOptions;
+use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
-use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, WindowFunction, SincInterpolationType};
 
 /// Represents a single audio source on the timeline.
 #[derive(Clone, Debug)]
@@ -114,9 +116,9 @@ impl AudioMixer {
                     let frame_count = track.samples.len() / 2;
 
                     if track.loop_audio {
-                         sample_idx %= frame_count;
+                        sample_idx %= frame_count;
                     } else if sample_idx >= frame_count {
-                         continue;
+                        continue;
                     }
 
                     let left = track.samples[sample_idx * 2];
@@ -155,12 +157,11 @@ pub fn resample_audio(samples: &[f32], source_rate: u32, target_rate: u32) -> Re
 
     let ratio = target_rate as f64 / source_rate as f64;
     let mut resampler = SincFixedIn::<f32>::new(
-        ratio,
-        256.0, // max_resample_ratio_relative
-        params,
-        1024, // input chunk size
-        2, // channels
-    ).context("Failed to create resampler")?;
+        ratio, 256.0, // max_resample_ratio_relative
+        params, 1024, // input chunk size
+        2,    // channels
+    )
+    .context("Failed to create resampler")?;
 
     // De-interleave
     let frames = samples.len() / 2;
@@ -188,11 +189,13 @@ pub fn resample_audio(samples: &[f32], source_rate: u32, target_rate: u32) -> Re
 
         // Pad if last chunk is smaller than required input size
         if len < input_chunk_size {
-             input_batch[0].resize(input_chunk_size, 0.0);
-             input_batch[1].resize(input_chunk_size, 0.0);
+            input_batch[0].resize(input_chunk_size, 0.0);
+            input_batch[1].resize(input_chunk_size, 0.0);
         }
 
-        let output_batch = resampler.process(&input_batch, None).context("Resampling failed")?;
+        let output_batch = resampler
+            .process(&input_batch, None)
+            .context("Resampling failed")?;
 
         // Append to output
         // Note: Rubato output size depends on input size and ratio.

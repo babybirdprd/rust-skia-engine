@@ -1,9 +1,9 @@
-use glam::{Vec2, Vec3, Vec4};
-use lottie_data::model::{BezierPath, Property, TextDocument, Value};
 #[cfg(feature = "expressions")]
 use crate::expressions::ExpressionEvaluator;
 #[cfg(feature = "expressions")]
-use boa_engine::{JsValue, js_string};
+use boa_engine::{js_string, JsValue};
+use glam::{Vec2, Vec3, Vec4};
+use lottie_data::model::{BezierPath, Property, TextDocument, Value};
 
 pub trait Interpolatable: Sized + Clone {
     fn lerp(&self, other: &Self, t: f32) -> Self;
@@ -173,7 +173,9 @@ impl Interpolatable for Vec<f32> {
 #[cfg(feature = "expressions")]
 pub trait ToJsValue {
     fn to_js_value(&self, context: &mut boa_engine::Context) -> JsValue;
-    fn from_js_value(v: &JsValue, context: &mut boa_engine::Context) -> Option<Self> where Self: Sized;
+    fn from_js_value(v: &JsValue, context: &mut boa_engine::Context) -> Option<Self>
+    where
+        Self: Sized;
 }
 
 #[cfg(not(feature = "expressions"))]
@@ -198,7 +200,7 @@ impl ToJsValue for Vec<f32> {
         let vals: Vec<JsValue> = self.iter().map(|f| JsValue::new(*f)).collect();
         boa_engine::object::builtins::JsArray::from_iter(vals, context).into()
     }
-     fn from_js_value(v: &JsValue, context: &mut boa_engine::Context) -> Option<Self> {
+    fn from_js_value(v: &JsValue, context: &mut boa_engine::Context) -> Option<Self> {
         if let Some(obj) = v.as_object() {
             if obj.is_array() {
                 if let Ok(len_val) = obj.get(js_string!("length"), context) {
@@ -242,7 +244,11 @@ impl ToJsValue for Vec2 {
 #[cfg(feature = "expressions")]
 impl ToJsValue for Vec3 {
     fn to_js_value(&self, context: &mut boa_engine::Context) -> JsValue {
-        let vals = vec![JsValue::new(self.x), JsValue::new(self.y), JsValue::new(self.z)];
+        let vals = vec![
+            JsValue::new(self.x),
+            JsValue::new(self.y),
+            JsValue::new(self.z),
+        ];
         boa_engine::object::builtins::JsArray::from_iter(vals, context).into()
     }
     fn from_js_value(v: &JsValue, context: &mut boa_engine::Context) -> Option<Self> {
@@ -261,7 +267,12 @@ impl ToJsValue for Vec3 {
 #[cfg(feature = "expressions")]
 impl ToJsValue for Vec4 {
     fn to_js_value(&self, context: &mut boa_engine::Context) -> JsValue {
-        let vals = vec![JsValue::new(self.x), JsValue::new(self.y), JsValue::new(self.z), JsValue::new(self.w)];
+        let vals = vec![
+            JsValue::new(self.x),
+            JsValue::new(self.y),
+            JsValue::new(self.z),
+            JsValue::new(self.w),
+        ];
         boa_engine::object::builtins::JsArray::from_iter(vals, context).into()
     }
     fn from_js_value(v: &JsValue, context: &mut boa_engine::Context) -> Option<Self> {
@@ -356,46 +367,46 @@ impl Animator {
         #[cfg(feature = "expressions")]
         if let Some(expr) = &prop.x {
             if let Some(eval) = evaluator {
-                 let time = frame / frame_rate; // Seconds
+                let time = frame / frame_rate; // Seconds
 
-                 // Calculate Loop Value (pre-calc logic for loopOut("cycle"))
-                 let loop_value = if let Value::Animated(keyframes) = &prop.k {
-                     if !keyframes.is_empty() {
-                         let first_t = keyframes[0].t;
-                         let last_t = keyframes[keyframes.len() - 1].t;
-                         let duration = last_t - first_t;
+                // Calculate Loop Value (pre-calc logic for loopOut("cycle"))
+                let loop_value = if let Value::Animated(keyframes) = &prop.k {
+                    if !keyframes.is_empty() {
+                        let first_t = keyframes[0].t;
+                        let last_t = keyframes[keyframes.len() - 1].t;
+                        let duration = last_t - first_t;
 
-                         if duration > 0.0 && frame > last_t {
-                             let t_since_end = frame - last_t;
-                             let cycle_offset = t_since_end % duration;
-                             let cycle_frame = first_t + cycle_offset;
-                             Self::resolve_keyframes(prop, cycle_frame, &converter, default.clone())
-                         } else {
-                             base_value.clone()
-                         }
-                     } else {
-                         base_value.clone()
-                     }
-                 } else {
-                     base_value.clone()
-                 };
+                        if duration > 0.0 && frame > last_t {
+                            let t_since_end = frame - last_t;
+                            let cycle_offset = t_since_end % duration;
+                            let cycle_frame = first_t + cycle_offset;
+                            Self::resolve_keyframes(prop, cycle_frame, &converter, default.clone())
+                        } else {
+                            base_value.clone()
+                        }
+                    } else {
+                        base_value.clone()
+                    }
+                } else {
+                    base_value.clone()
+                };
 
-                 let (js_val, js_loop_val) = {
-                     let ctx = eval.context();
-                     (base_value.to_js_value(ctx), loop_value.to_js_value(ctx))
-                 };
+                let (js_val, js_loop_val) = {
+                    let ctx = eval.context();
+                    (base_value.to_js_value(ctx), loop_value.to_js_value(ctx))
+                };
 
-                 match eval.evaluate(expr, &js_val, &js_loop_val, time, frame_rate) {
-                     Ok(res) => {
-                          let context = eval.context();
-                          if let Some(val) = U::from_js_value(&res, context) {
-                               return val;
-                          }
-                     },
-                     Err(_e) => {
-                         // eprintln!("Expression failed: {}", _e);
-                     }
-                 }
+                match eval.evaluate(expr, &js_val, &js_loop_val, time, frame_rate) {
+                    Ok(res) => {
+                        let context = eval.context();
+                        if let Some(val) = U::from_js_value(&res, context) {
+                            return val;
+                        }
+                    }
+                    Err(_e) => {
+                        // eprintln!("Expression failed: {}", _e);
+                    }
+                }
             }
         }
 
@@ -411,7 +422,7 @@ impl Animator {
     where
         U: Interpolatable,
     {
-         match &prop.k {
+        match &prop.k {
             Value::Default => default,
             Value::Static(v) => converter(v),
             Value::Animated(keyframes) => {
@@ -436,15 +447,15 @@ impl Animator {
                 let len = keyframes.len();
                 // If idx == len, then all keyframes have t <= frame. frame is after end (or exactly at end).
                 if idx >= len {
-                     let last = &keyframes[len - 1];
-                     // Use end value if present, else start value
-                     if let Some(e) = &last.e {
-                         return converter(e);
-                     }
-                     if let Some(s) = &last.s {
-                         return converter(s);
-                     }
-                     return default;
+                    let last = &keyframes[len - 1];
+                    // Use end value if present, else start value
+                    if let Some(e) = &last.e {
+                        return converter(e);
+                    }
+                    if let Some(s) = &last.s {
+                        return converter(s);
+                    }
+                    return default;
                 }
 
                 // Segment is [idx-1, idx]
@@ -493,12 +504,7 @@ impl Animator {
 
                 local_t = solve_cubic_bezier(p1, p2, local_t);
 
-                start_val.lerp_spatial(
-                    &end_val,
-                    local_t,
-                    kf_end.ti.as_ref(),
-                    kf_start.to.as_ref(),
-                )
+                start_val.lerp_spatial(&end_val, local_t, kf_end.ti.as_ref(), kf_start.to.as_ref())
             }
         }
     }
@@ -517,20 +523,32 @@ mod tests {
                 t: 0.0,
                 s: Some(0.0),
                 e: Some(10.0),
-                i: None, o: None, to: None, ti: None, h: None,
+                i: None,
+                o: None,
+                to: None,
+                ti: None,
+                h: None,
             },
             Keyframe {
                 t: 10.0,
                 s: Some(10.0),
                 e: Some(20.0),
-                i: None, o: None, to: None, ti: None, h: None,
+                i: None,
+                o: None,
+                to: None,
+                ti: None,
+                h: None,
             },
             Keyframe {
                 t: 20.0,
                 s: Some(20.0),
                 e: Some(30.0),
-                i: None, o: None, to: None, ti: None, h: None,
-            }
+                i: None,
+                o: None,
+                to: None,
+                ti: None,
+                h: None,
+            },
         ];
 
         let prop = Property {

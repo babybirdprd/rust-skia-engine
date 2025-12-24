@@ -178,7 +178,11 @@ fn test_offset_normalization_positive_huge() {
 
     // Total length = 20.
     // 2025 % 20 = 5.
-    assert!((dash.offset - 5.0).abs() < 0.001, "Expected offset 5.0, got {}", dash.offset);
+    assert!(
+        (dash.offset - 5.0).abs() < 0.001,
+        "Expected offset 5.0, got {}",
+        dash.offset
+    );
 }
 
 #[test]
@@ -218,7 +222,11 @@ fn test_offset_normalization_negative() {
     // Total length = 20.
     // -5 % 20 -> -5.
     // (-5 % 20 + 20) % 20 -> 15.
-    assert!((dash.offset - 15.0).abs() < 0.001, "Expected offset 15.0, got {}", dash.offset);
+    assert!(
+        (dash.offset - 15.0).abs() < 0.001,
+        "Expected offset 15.0, got {}",
+        dash.offset
+    );
 }
 
 #[test]

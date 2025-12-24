@@ -1,6 +1,6 @@
-use serde::{Serialize, Deserialize};
-use director_core::types::{Color, GradientConfig};
 use director_core::animation::{EasingType, SpringConfig};
+use director_core::types::{Color, GradientConfig};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MovieRequest {
@@ -55,7 +55,7 @@ pub enum NodeKind {
     },
     Video {
         src: String,
-    }
+    },
 }
 
 // Simplified Style Map for JSON (maps to Taffy later)
@@ -102,41 +102,37 @@ mod tests {
             width: 1920,
             height: 1080,
             fps: 30,
-            scenes: vec![
-                Scene {
-                    id: "scene_1".to_string(),
-                    duration_secs: 5.0,
-                    background: Some(Color::BLACK),
-                    root: Node {
-                        id: "root".to_string(),
-                        kind: NodeKind::Box { border_radius: 0.0 },
+            scenes: vec![Scene {
+                id: "scene_1".to_string(),
+                duration_secs: 5.0,
+                background: Some(Color::BLACK),
+                root: Node {
+                    id: "root".to_string(),
+                    kind: NodeKind::Box { border_radius: 0.0 },
+                    style: StyleMap {
+                        width: Some("100%".to_string()),
+                        height: Some("100%".to_string()),
+                        bg_color: Some(Color::new(0.1, 0.1, 0.1, 1.0)),
+                        ..Default::default()
+                    },
+                    transform: TransformMap::default(),
+                    animations: vec![],
+                    children: vec![Node {
+                        id: "text_1".to_string(),
+                        kind: NodeKind::Text {
+                            content: "Hello JSON".to_string(),
+                            font_size: 100.0,
+                        },
                         style: StyleMap {
-                            width: Some("100%".to_string()),
-                            height: Some("100%".to_string()),
-                            bg_color: Some(Color::new(0.1, 0.1, 0.1, 1.0)),
+                            bg_color: Some(Color::WHITE),
                             ..Default::default()
                         },
                         transform: TransformMap::default(),
                         animations: vec![],
-                        children: vec![
-                            Node {
-                                id: "text_1".to_string(),
-                                kind: NodeKind::Text {
-                                    content: "Hello JSON".to_string(),
-                                    font_size: 100.0,
-                                },
-                                style: StyleMap {
-                                    bg_color: Some(Color::WHITE),
-                                    ..Default::default()
-                                },
-                                transform: TransformMap::default(),
-                                animations: vec![],
-                                children: vec![],
-                            }
-                        ],
-                    },
-                }
-            ],
+                        children: vec![],
+                    }],
+                },
+            }],
         };
 
         let json = serde_json::to_string_pretty(&movie).unwrap();

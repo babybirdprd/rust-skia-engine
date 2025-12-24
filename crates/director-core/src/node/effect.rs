@@ -1,11 +1,11 @@
 use crate::animation::{Animated, TweenableVector};
 use crate::element::Element;
+use crate::errors::RenderError;
 use crate::node::parse_easing;
 use crate::types::Color;
-use crate::errors::RenderError;
 use skia_safe::{
-    color_filters, image_filters, runtime_effect::RuntimeShaderBuilder, Canvas, ColorMatrix,
-    Paint, Rect, RuntimeEffect, TileMode,
+    color_filters, image_filters, runtime_effect::RuntimeShaderBuilder, Canvas, ColorMatrix, Paint,
+    Rect, RuntimeEffect, TileMode,
 };
 use std::any::Any;
 use std::collections::HashMap;
