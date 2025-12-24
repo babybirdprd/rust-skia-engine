@@ -197,7 +197,7 @@ pub enum Shape {
     #[serde(rename = "sr")]
     Polystar(PolystarShape),
     #[serde(rename = "rp")]
-    Repeater(RepeaterShape),
+    Repeater(Box<RepeaterShape>),
     #[serde(rename = "rd")]
     RoundCorners(RoundCornersShape),
     #[serde(rename = "zz")]
@@ -498,8 +498,9 @@ impl<T> Default for Property<T> {
     }
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, Default)]
 pub enum Value<T> {
+    #[default]
     Default,
     Static(T),
     Animated(Vec<Keyframe<T>>),
@@ -531,12 +532,6 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for Value<T> {
         }
 
         Ok(Value::Default)
-    }
-}
-
-impl<T> Default for Value<T> {
-    fn default() -> Self {
-        Value::Default
     }
 }
 
@@ -611,7 +606,7 @@ impl<'de> Deserialize<'de> for Vec3DefaultZero {
                 let y = seq.next_element()?.unwrap_or(0.0);
                 let z = seq.next_element()?.unwrap_or(0.0);
                 // Consume remaining if any (shouldn't be)
-                while let Some(_) = seq.next_element::<f32>()? {}
+                while (seq.next_element::<f32>()?).is_some() {}
                 Ok(Vec3DefaultZero([x, y, z]))
             }
         }
@@ -647,7 +642,7 @@ impl<'de> Deserialize<'de> for Vec3Scale {
                 let x = seq.next_element()?.unwrap_or(0.0);
                 let y = seq.next_element()?.unwrap_or(0.0);
                 let z = seq.next_element()?.unwrap_or(100.0); // Default to 100%
-                while let Some(_) = seq.next_element::<f32>()? {}
+                while (seq.next_element::<f32>()?).is_some() {}
                 Ok(Vec3Scale([x, y, z]))
             }
         }
