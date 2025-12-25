@@ -11,6 +11,9 @@ pub struct ExpressionEvaluator {
     // or just pass it into `evaluate` via global variable updates.
 }
 
+#[cfg(not(feature = "expressions"))]
+pub struct ExpressionEvaluator;
+
 #[cfg(feature = "expressions")]
 impl ExpressionEvaluator {
     pub fn new() -> Self {

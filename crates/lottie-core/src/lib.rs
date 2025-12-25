@@ -1,12 +1,10 @@
 pub mod animatable;
-#[cfg(feature = "expressions")]
 pub mod expressions;
 pub mod modifiers;
 pub mod renderer;
 
 use animatable::Animator;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-#[cfg(feature = "expressions")]
 use expressions::ExpressionEvaluator;
 use glam::{Mat3, Mat4, Vec2, Vec3, Vec4};
 use kurbo::{BezPath, Point, Shape as _};
@@ -164,16 +162,19 @@ pub struct LottiePlayer {
     pub current_frame: f32,
     #[cfg(feature = "expressions")]
     pub expression_evaluator: Option<ExpressionEvaluator>,
+    #[cfg(not(feature = "expressions"))]
+    pub expression_evaluator: Option<ExpressionEvaluator>,
 }
 
 impl LottiePlayer {
     pub fn new() -> Self {
         #[cfg(feature = "expressions")]
         let expression_evaluator = Some(ExpressionEvaluator::new());
+        #[cfg(not(feature = "expressions"))]
+        let expression_evaluator = None;
         Self {
             asset: None,
             current_frame: 0.0,
-            #[cfg(feature = "expressions")]
             expression_evaluator,
         }
     }
@@ -206,10 +207,7 @@ impl LottiePlayer {
 
     pub fn render_tree(&mut self) -> RenderTree {
         if let Some(asset) = &self.asset {
-            #[cfg(feature = "expressions")]
             let evaluator = self.expression_evaluator.as_mut();
-            #[cfg(not(feature = "expressions"))]
-            let evaluator: Option<&mut ()> = None;
 
             let mut builder = SceneGraphBuilder::new(asset, self.current_frame);
             builder.build(evaluator)
@@ -239,11 +237,7 @@ impl<'a> SceneGraphBuilder<'a> {
         }
     }
 
-    fn build(
-        &mut self,
-        #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
-    ) -> RenderTree {
+    fn build(&mut self, mut evaluator: Option<&mut ExpressionEvaluator>) -> RenderTree {
         let mut layer_map = HashMap::new();
         for layer in &self.asset.model.layers {
             if let Some(ind) = layer.ind {
@@ -272,8 +266,7 @@ impl<'a> SceneGraphBuilder<'a> {
         &self,
         layers: &'a [data::Layer],
         map: &HashMap<u32, &'a data::Layer>,
-        #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        mut evaluator: Option<&mut ExpressionEvaluator>,
     ) -> (Mat4, Mat4) {
         // Step 1: Find Active Camera (Top-most, ty=13, visible)
         let mut camera_layer = None;
@@ -331,8 +324,7 @@ impl<'a> SceneGraphBuilder<'a> {
         &mut self,
         layers: &'a [data::Layer],
         layer_map: &HashMap<u32, &'a data::Layer>,
-        #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        mut evaluator: Option<&mut ExpressionEvaluator>,
     ) -> RenderNode {
         let mut nodes = Vec::new();
         let mut consumed_indices = HashSet::new();
@@ -399,8 +391,7 @@ impl<'a> SceneGraphBuilder<'a> {
         &mut self,
         layer: &'a data::Layer,
         layer_map: &HashMap<u32, &'a data::Layer>,
-        #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        mut evaluator: Option<&mut ExpressionEvaluator>,
     ) -> Option<RenderNode> {
         let is_adjustment_layer = layer.ao == Some(1);
 
@@ -907,8 +898,7 @@ impl<'a> SceneGraphBuilder<'a> {
     fn process_layer_styles(
         &self,
         layer: &data::Layer,
-        #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        mut evaluator: Option<&mut ExpressionEvaluator>,
     ) -> Vec<LayerStyle> {
         let mut styles = Vec::new();
         if let Some(sy_list) = &layer.sy {
@@ -1121,8 +1111,7 @@ impl<'a> SceneGraphBuilder<'a> {
     fn process_effects(
         &self,
         layer: &data::Layer,
-        #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        mut evaluator: Option<&mut ExpressionEvaluator>,
     ) -> Vec<Effect> {
         let mut effects = Vec::new();
         if let Some(ef_list) = &layer.ef {
@@ -1329,8 +1318,7 @@ impl<'a> SceneGraphBuilder<'a> {
         index: usize,
         name_hint: &str,
         layer: &data::Layer,
-        #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        mut evaluator: Option<&mut ExpressionEvaluator>,
     ) -> f32 {
         if let Some(v) = values.get(index) {
             if let Some(prop) = &v.v {
@@ -1363,8 +1351,7 @@ impl<'a> SceneGraphBuilder<'a> {
         index: usize,
         name_hint: &str,
         layer: &data::Layer,
-        #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        mut evaluator: Option<&mut ExpressionEvaluator>,
     ) -> Vec4 {
         if let Some(v) = values.get(index) {
             if let Some(prop) = &v.v {
@@ -1395,8 +1382,7 @@ impl<'a> SceneGraphBuilder<'a> {
         &self,
         prop: &data::Property<serde_json::Value>,
         frame: f32,
-        #[cfg(feature = "expressions")] evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] evaluator: Option<&mut ()>,
+        evaluator: Option<&mut ExpressionEvaluator>,
     ) -> f32 {
         Animator::resolve(
             prop,
@@ -1420,8 +1406,7 @@ impl<'a> SceneGraphBuilder<'a> {
         &self,
         prop: &data::Property<serde_json::Value>,
         frame: f32,
-        #[cfg(feature = "expressions")] evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] evaluator: Option<&mut ()>,
+        evaluator: Option<&mut ExpressionEvaluator>,
     ) -> Vec4 {
         Animator::resolve(
             prop,
@@ -1447,8 +1432,7 @@ impl<'a> SceneGraphBuilder<'a> {
         &self,
         prop: &data::Property<Vec<f32>>,
         frame: f32,
-        #[cfg(feature = "expressions")] evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] evaluator: Option<&mut ()>,
+        evaluator: Option<&mut ExpressionEvaluator>,
     ) -> Vec4 {
         Animator::resolve(
             prop,
@@ -1472,8 +1456,7 @@ impl<'a> SceneGraphBuilder<'a> {
         &self,
         layer: &data::Layer,
         map: &HashMap<u32, &data::Layer>,
-        #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        mut evaluator: Option<&mut ExpressionEvaluator>,
     ) -> Mat4 {
         let local = self.get_layer_transform(layer, evaluator.as_deref_mut());
         if let Some(parent_ind) = layer.parent {
@@ -1487,8 +1470,7 @@ impl<'a> SceneGraphBuilder<'a> {
     fn get_layer_transform(
         &self,
         layer: &data::Layer,
-        #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        mut evaluator: Option<&mut ExpressionEvaluator>,
     ) -> Mat4 {
         let t_frame = self.frame - layer.st;
         let ks = &layer.ks;
@@ -1727,8 +1709,7 @@ impl<'a> SceneGraphBuilder<'a> {
         &self,
         ks: &data::Transform,
         frame: f32,
-        #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        mut evaluator: Option<&mut ExpressionEvaluator>,
     ) -> Mat3 {
         // Anchor (2D)
         let anchor_3d = Animator::resolve(
@@ -1808,8 +1789,7 @@ impl<'a> SceneGraphBuilder<'a> {
         &self,
         shapes: &'a [data::Shape],
         frame: f32,
-        #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        mut evaluator: Option<&mut ExpressionEvaluator>,
     ) -> Vec<RenderNode> {
         let mut processed_nodes = Vec::new();
         let mut active_geometries: Vec<PendingGeometry> = Vec::new();
@@ -2574,8 +2554,7 @@ impl<'a> SceneGraphBuilder<'a> {
         &self,
         props: &[data::DashProperty],
         frame: f32,
-        #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] #[allow(unused_mut)] mut evaluator: Option<&mut ()>,
+        mut evaluator: Option<&mut ExpressionEvaluator>,
     ) -> Option<DashPattern> {
         if props.is_empty() {
             return None;
@@ -2852,8 +2831,7 @@ impl<'a> SceneGraphBuilder<'a> {
         &self,
         p: &data::PathShape,
         frame: f32,
-        #[cfg(feature = "expressions")] evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] evaluator: Option<&mut ()>,
+        evaluator: Option<&mut ExpressionEvaluator>,
     ) -> BezPath {
         let path_data = Animator::resolve(
             &p.ks,
@@ -2908,8 +2886,7 @@ impl<'a> SceneGraphBuilder<'a> {
         &self,
         masks_props: &[data::MaskProperties],
         frame: f32,
-        #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        mut evaluator: Option<&mut ExpressionEvaluator>,
     ) -> Vec<Mask> {
         let mut masks = Vec::new();
         for m in masks_props {

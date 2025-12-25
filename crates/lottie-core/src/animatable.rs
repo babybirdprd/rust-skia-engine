@@ -1,4 +1,3 @@
-#[cfg(feature = "expressions")]
 use crate::expressions::ExpressionEvaluator;
 #[cfg(feature = "expressions")]
 use boa_engine::{js_string, JsValue};
@@ -353,8 +352,7 @@ impl Animator {
         frame: f32,
         converter: impl Fn(&T) -> U,
         default: U,
-        #[cfg(feature = "expressions")] evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] _evaluator: Option<&mut ()>, // Dummy type
+        evaluator: Option<&mut ExpressionEvaluator>,
         _frame_rate: f32,
     ) -> U
     where
