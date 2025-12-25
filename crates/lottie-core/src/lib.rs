@@ -435,11 +435,10 @@ impl<'a> SceneGraphBuilder<'a> {
             );
 
             let base_fill_color = Vec4::new(doc.fc[0], doc.fc[1], doc.fc[2], 1.0);
-            let base_stroke_color = if let Some(sc) = &doc.sc {
-                Some(Vec4::new(sc[0], sc[1], sc[2], 1.0))
-            } else {
-                None
-            };
+            let base_stroke_color = doc
+                .sc
+                .as_ref()
+                .map(|sc| Vec4::new(sc[0], sc[1], sc[2], 1.0));
 
             let chars: Vec<char> = doc.t.chars().collect();
             let char_count = chars.len();
@@ -1397,7 +1396,7 @@ impl<'a> SceneGraphBuilder<'a> {
         prop: &data::Property<serde_json::Value>,
         frame: f32,
         #[cfg(feature = "expressions")] evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        #[cfg(not(feature = "expressions"))] evaluator: Option<&mut ()>,
     ) -> f32 {
         Animator::resolve(
             prop,
@@ -1422,7 +1421,7 @@ impl<'a> SceneGraphBuilder<'a> {
         prop: &data::Property<serde_json::Value>,
         frame: f32,
         #[cfg(feature = "expressions")] evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        #[cfg(not(feature = "expressions"))] evaluator: Option<&mut ()>,
     ) -> Vec4 {
         Animator::resolve(
             prop,
@@ -1449,7 +1448,7 @@ impl<'a> SceneGraphBuilder<'a> {
         prop: &data::Property<Vec<f32>>,
         frame: f32,
         #[cfg(feature = "expressions")] evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        #[cfg(not(feature = "expressions"))] evaluator: Option<&mut ()>,
     ) -> Vec4 {
         Animator::resolve(
             prop,
@@ -2322,7 +2321,7 @@ impl<'a> SceneGraphBuilder<'a> {
                                     rule: FillRule::NonZero,
                                 }),
                                 stroke: None,
-                                trim: trim.clone(),
+                                trim,
                             }),
                             masks: vec![],
                             styles: vec![],
@@ -2390,7 +2389,7 @@ impl<'a> SceneGraphBuilder<'a> {
                                     rule: FillRule::NonZero,
                                 }),
                                 stroke: None,
-                                trim: trim.clone(),
+                                trim,
                             }),
                             masks: vec![],
                             styles: vec![],
@@ -2479,7 +2478,7 @@ impl<'a> SceneGraphBuilder<'a> {
                                     miter_limit: gs.ml,
                                     dash: dash.clone(),
                                 }),
-                                trim: trim.clone(),
+                                trim,
                             }),
                             masks: vec![],
                             styles: vec![],
@@ -2541,7 +2540,7 @@ impl<'a> SceneGraphBuilder<'a> {
                                     miter_limit: s.ml,
                                     dash: dash.clone(),
                                 }),
-                                trim: trim.clone(),
+                                trim,
                             }),
                             masks: vec![],
                             styles: vec![],
@@ -2576,7 +2575,7 @@ impl<'a> SceneGraphBuilder<'a> {
         props: &[data::DashProperty],
         frame: f32,
         #[cfg(feature = "expressions")] mut evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        #[cfg(not(feature = "expressions"))] #[allow(unused_mut)] mut evaluator: Option<&mut ()>,
     ) -> Option<DashPattern> {
         if props.is_empty() {
             return None;
@@ -2854,7 +2853,7 @@ impl<'a> SceneGraphBuilder<'a> {
         p: &data::PathShape,
         frame: f32,
         #[cfg(feature = "expressions")] evaluator: Option<&mut ExpressionEvaluator>,
-        #[cfg(not(feature = "expressions"))] mut evaluator: Option<&mut ()>,
+        #[cfg(not(feature = "expressions"))] evaluator: Option<&mut ()>,
     ) -> BezPath {
         let path_data = Animator::resolve(
             &p.ks,

@@ -355,7 +355,7 @@ impl Animator {
         default: U,
         #[cfg(feature = "expressions")] evaluator: Option<&mut ExpressionEvaluator>,
         #[cfg(not(feature = "expressions"))] _evaluator: Option<&mut ()>, // Dummy type
-        frame_rate: f32,
+        _frame_rate: f32,
     ) -> U
     where
         U: Interpolatable + 'static + ToJsValue,
