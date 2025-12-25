@@ -587,7 +587,7 @@ impl<'a> SceneGraphBuilder<'a> {
                         let overlap_start = idx.max(effective_start);
                         let overlap_end = (idx + 1.0).min(effective_end);
 
-                        let factor = (overlap_end - overlap_start).max(0.0).min(1.0);
+                        let factor = (overlap_end - overlap_start).clamp(0.0, 1.0);
 
                         if factor > 0.0 {
                             glyph.pos += p_delta * factor;
