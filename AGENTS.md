@@ -141,9 +141,15 @@ let _ = tracing_subscriber::fmt()
 
 ## Documentation
 
+> 🤖 **Start here:** [DOCS_INDEX.md](DOCS_INDEX.md) is the canonical navigation index.
+
 | Doc | Purpose |
 |-----|---------|
-| `docs/SCRIPTING.md` | Rhai API reference |
-| `docs/ARCHITECTURE.md` | Engine design |
-| `docs/ROADMAP.md` | Development milestones |
+| `DOCS_INDEX.md` | Documentation navigation |
+| `docs/user/scripting-guide.md` | Rhai API reference |
+| `docs/architecture/overview.md` | Engine design |
+| `docs/architecture/roadmap.md` | Development milestones |
+| `docs/contributing/development.md` | Build guide & contributing |
+| `docs/specs/` | Design specifications |
 | `examples/` | Working Rhai scripts |
+

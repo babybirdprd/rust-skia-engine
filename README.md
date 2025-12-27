@@ -115,12 +115,13 @@ See [docs/BUILD_GUIDE.md](docs/BUILD_GUIDE.md) for detailed setup.
 
 | Document | Description |
 |----------|-------------|
-| [docs/SCRIPTING.md](docs/SCRIPTING.md) | Complete Rhai API reference |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Engine internals |
-| [docs/BUILD_GUIDE.md](docs/BUILD_GUIDE.md) | Build instructions |
-| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | How to contribute |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Development milestones |
+| [DOCS_INDEX.md](DOCS_INDEX.md) | Documentation navigation index |
+| [docs/user/scripting-guide.md](docs/user/scripting-guide.md) | Complete Rhai API reference |
+| [docs/architecture/overview.md](docs/architecture/overview.md) | Engine internals |
+| [docs/contributing/development.md](docs/contributing/development.md) | Build guide & contributing |
+| [docs/architecture/roadmap.md](docs/architecture/roadmap.md) | Development milestones |
 | [examples/README.md](examples/README.md) | Example scripts index |
+
 
 ---
 
