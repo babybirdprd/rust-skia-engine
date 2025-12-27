@@ -1,5 +1,7 @@
 # Director
 
+[![CI](https://github.com/babybirdprd/director/actions/workflows/ci.yml/badge.svg)](https://github.com/babybirdprd/director/actions/workflows/ci.yml)
+
 > ⚠️ **Pre-release** — API may change before v1.0
 
 **A programmatic video rendering engine in Rust.**
