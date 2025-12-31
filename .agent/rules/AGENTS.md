@@ -1,6 +1,63 @@
+---
+trigger: always_on
+---
+
 # Agent Instructions for `director-engine`
 
-Instructions for AI agents working with this codebase.
+> [!IMPORTANT]
+> **Agent Protocol - MANDATORY**
+>
+> 1. **Read First**: Before editing any file, check if it has a `//!` doc block at the top. Read it to understand the module's responsibilities.
+> 2. **Find via Map**: Use the **Codebase Map** below to locate the correct file for your task. Do not guess file locations.
+> 3. **Update In-Code Docs**: When adding/removing/renaming major functions or changing a module's responsibilities, **you MUST update** the `//!` doc block in that file.
+> 4. **Update Codebase Map**: When adding a new file, deleting a file, or shifting responsibilities between modules, **you MUST update** the Codebase Map tables below.
+
+---
+
+## Codebase Map
+
+Use this map to locate the correct file for a specific task.
+
+### Core Systems (`crates/director-core/src`)
+| Responsibility | Primary File | Key Structs |
+| :--- | :--- | :--- |
+| **Orchestration** | `director.rs` | `Director`, `TimelineItem` |
+| **Scene Graph** | `scene.rs` | `SceneGraph` (Arena), `SceneNode` |
+| **Element Trait** | `element.rs` | `Element` trait (all nodes implement) |
+| **Shared Types** | `types.rs` | `Color`, `Transform`, `NodeId` |
+| **Design System** | `tokens.rs` | `DesignSystem`, spacing, safe areas |
+| **Rendering** | `systems/renderer.rs` | `render_recursive`, `render_export` |
+| **Layout** | `systems/layout.rs` | `LayoutEngine`, Taffy integration |
+| **Assets** | `systems/assets.rs` | `AssetManager`, fonts, shaders |
+| **Scripting** | `scripting.rs` | Rhai engine, all API bindings |
+| **Animation** | `animation.rs` | `Animated`, `EasingType`, springs |
+| **Audio** | `audio.rs` | `AudioMixer`, `AudioTrack` |
+| **Video Encoding** | `video_wrapper.rs` | FFMPEG/video-rs wrapper |
+
+### Node Types (`crates/director-core/src/node`)
+| Node | File | Use Case |
+| :--- | :--- | :--- |
+| **Box** | `box_node.rs` | Container with flexbox, borders, backgrounds |
+| **Text** | `text.rs` | Rich text rendering (SkParagraph) |
+| **Image** | `image_node.rs` | Static image display |
+| **Video** | `video_node.rs` | Video playback |
+| **Lottie** | `lottie.rs` | Lottie animation embedding |
+| **Vector** | `vector.rs` | SVG-like vector graphics |
+| **Effect** | `effect.rs` | Visual effects/shaders |
+| **Composition** | `composition.rs` | Nested scene composition |
+
+### Schema and Pipeline (`crates/`)
+| Responsibility | Primary File | Notes |
+| :--- | :--- | :--- |
+| **DSL Types** | `director-schema/src/lib.rs` | `NodeKind`, `StyleMap`, JSON serialization |
+| **Asset Pipeline** | `director-pipeline/src/lib.rs` | `build_node_recursive`, DSL to SceneGraph |
+
+### Lottie System (`crates/lottie-*`)
+| Responsibility | Primary File | Notes |
+| :--- | :--- | :--- |
+| **Lottie Parsing** | `lottie-core/src/lib.rs` | JSON model, keyframe evaluation |
+| **Lottie Data** | `lottie-data/src/model.rs` | Raw Lottie JSON types |
+| **Lottie Rendering** | `lottie-skia/src/lib.rs` | Skia path drawing |
 
 ---
 
@@ -61,20 +118,6 @@ crates/
 
 ---
 
-## Critical Files
-
-| File | Purpose |
-|------|---------|
-| `scripting.rs` | All Rhai API bindings |
-| `director.rs` | Timeline and update loop |
-| `scene.rs` | Scene graph storage |
-| `systems/renderer.rs` | Skia rendering |
-| `systems/layout.rs` | Taffy layout |
-| `node/text.rs` | Text rendering (SkParagraph) |
-| `node/box_node.rs` | Box layout/styling |
-
----
-
 ## Common Tasks
 
 ### Add a Rhai API
@@ -87,6 +130,7 @@ crates/
 2. Implement `Element` trait
 3. Add to `node/mod.rs`
 4. Add Rhai binding in `scripting.rs`
+5. **Update the Codebase Map** (Node Types table)
 
 ### Run Tests
 ```bash
@@ -112,7 +156,7 @@ $env:UPDATE_SNAPSHOTS="1"; cargo test -p director-core
 ### Text Rendering
 - Uses `skia_safe::textlayout::Paragraph` (SkParagraph)
 - NOT cosmic-text
-- Text animators currently DISABLED (V2 feature)
+- Text animators enabled via `add_text_animator`
 
 ### Performance
 - Avoid logging in per-pixel or per-frame loops
@@ -141,7 +185,7 @@ let _ = tracing_subscriber::fmt()
 
 ## Documentation
 
-> 🤖 **Start here:** [DOCS_INDEX.md](DOCS_INDEX.md) is the canonical navigation index.
+> Start here: [DOCS_INDEX.md](../../DOCS_INDEX.md) is the canonical navigation index.
 
 | Doc | Purpose |
 |-----|---------|
@@ -152,4 +196,3 @@ let _ = tracing_subscriber::fmt()
 | `docs/contributing/development.md` | Build guide & contributing |
 | `docs/specs/` | Design specifications |
 | `examples/` | Working Rhai scripts |
-

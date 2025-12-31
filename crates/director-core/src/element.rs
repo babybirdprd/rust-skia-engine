@@ -1,9 +1,21 @@
+//! # Element Module
+//!
+//! The core trait that all visual nodes must implement.
+//!
+//! ## Responsibilities
+//! - **Element Trait**: Defines `update`, `render`, `layout_style`, `measure`.
+//! - **Text Types**: `TextSpan`, `TextShadow`, `TextFit` for rich text.
+//!
+//! ## Key Types
+//! - `Element`: The trait every node type implements.
+//! - `TextSpan`: A styled span for rich text rendering.
+
+use crate::types::{Color, GradientConfig};
 use skia_safe::{Canvas, Rect};
-use taffy::style::Style;
+use std::any::Any;
 use taffy::geometry::Size;
 use taffy::style::AvailableSpace;
-use std::any::Any;
-use crate::types::{Color, GradientConfig};
+use taffy::style::Style;
 use tracing::warn;
 
 /// Represents a span of text with specific styling properties.
@@ -47,7 +59,10 @@ pub trait ElementClone {
     fn clone_box(&self) -> Box<dyn Element>;
 }
 
-impl<T> ElementClone for T where T: 'static + Element + Clone {
+impl<T> ElementClone for T
+where
+    T: 'static + Element + Clone,
+{
     fn clone_box(&self) -> Box<dyn Element> {
         Box::new(self.clone())
     }
@@ -68,7 +83,11 @@ pub trait Element: std::fmt::Debug + ElementClone {
     }
 
     /// Computes the size of the element given the available space.
-    fn measure(&self, _known_dimensions: Size<Option<f32>>, _available_space: Size<AvailableSpace>) -> Size<f32> {
+    fn measure(
+        &self,
+        _known_dimensions: Size<Option<f32>>,
+        _available_space: Size<AvailableSpace>,
+    ) -> Size<f32> {
         Size::ZERO
     }
 
@@ -98,13 +117,32 @@ pub trait Element: std::fmt::Debug + ElementClone {
     /// * `layout_rect` - The computed layout box for this element.
     /// * `opacity` - The inherited opacity from parent nodes.
     /// * `draw_children` - A closure to trigger rendering of children nodes.
-    fn render(&self, canvas: &Canvas, layout_rect: Rect, opacity: f32, draw_children: &mut dyn FnMut(&Canvas)) -> Result<(), crate::RenderError>;
+    fn render(
+        &self,
+        canvas: &Canvas,
+        layout_rect: Rect,
+        opacity: f32,
+        draw_children: &mut dyn FnMut(&Canvas),
+    ) -> Result<(), crate::RenderError>;
 
     /// Animates a specific named property.
-    fn animate_property(&mut self, property: &str, start: f32, target: f32, duration: f64, easing: &str);
+    fn animate_property(
+        &mut self,
+        property: &str,
+        start: f32,
+        target: f32,
+        duration: f64,
+        easing: &str,
+    );
 
     /// Animates a property using physics-based spring dynamics.
-    fn animate_property_spring(&mut self, _property: &str, _start: Option<f32>, _target: f32, _config: crate::animation::SpringConfig) {
+    fn animate_property_spring(
+        &mut self,
+        _property: &str,
+        _start: Option<f32>,
+        _target: f32,
+        _config: crate::animation::SpringConfig,
+    ) {
         // Default: No-op or Warn
     }
 
@@ -125,7 +163,7 @@ pub trait Element: std::fmt::Debug + ElementClone {
         _start_val: f32,
         _target_val: f32,
         _duration: f64,
-        _easing: &str
+        _easing: &str,
     ) {
         // Default implementation: Warn user
         warn!("add_animator called on a non-text node.");

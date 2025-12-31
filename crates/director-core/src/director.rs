@@ -1,3 +1,17 @@
+//! # Director Module
+//!
+//! The central orchestrator for the video rendering engine.
+//!
+//! ## Responsibilities
+//! - **Timeline Management**: Maintains a `Vec<TimelineItem>` of scenes.
+//! - **Update Loop**: Drives animation, audio sync, and scene transitions.
+//! - **Scene Coordination**: Manages active scenes and their time ranges.
+//!
+//! ## Key Types
+//! - `Director`: The god object that owns timeline, assets, and context.
+//! - `TimelineItem`: A scene with start time, duration, and transitions.
+//! - `DirectorContext`: Shared state for nested compositions.
+
 // use rayon::prelude::*; // Rayon disabled due to Taffy !Send
 use crate::animation::EasingType;
 use crate::audio::{AudioMixer, AudioTrack};

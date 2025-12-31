@@ -1,3 +1,17 @@
+//! # Scene Graph Module
+//!
+//! Arena-based storage for the node hierarchy.
+//!
+//! ## Responsibilities
+//! - **Node Storage**: `Vec<Option<SceneNode>>` arena with `NodeId` indices.
+//! - **Hierarchy**: Parent-child relationships via `children` and `parent`.
+//! - **Node Operations**: Add, remove, reparent nodes.
+//!
+//! ## Key Types
+//! - `SceneGraph`: The arena container.
+//! - `SceneNode`: Wraps an `Element` with layout and hierarchy data.
+//! - `NodeId`: A `usize` index into the arena (defined in `types.rs`).
+
 use crate::element::Element;
 use crate::types::{NodeId, PathAnimationState, Transform};
 

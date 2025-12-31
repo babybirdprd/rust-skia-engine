@@ -1,5 +1,18 @@
-use std::collections::HashMap;
+//! # Tokens Module
+//!
+//! Design system tokens exposed to scripting.
+//!
+//! ## Responsibilities
+//! - **Spacing**: Preset spacing values (`xs`, `md`, `xl`, etc.).
+//! - **Safe Areas**: Platform-specific UI-safe zones.
+//! - **Border Tokens**: Radius and width presets.
+//!
+//! ## Key Types
+//! - `DesignSystem`: Collection of all design tokens.
+//! - `SafeZone`: Platform padding presets.
+
 use crate::types::SafeZone;
+use std::collections::HashMap;
 
 /// A collection of standard design tokens (spacing, radii, safe areas) exposed to the scripting API.
 #[derive(Clone, Debug)]
@@ -71,29 +84,108 @@ impl DesignSystem {
         let mut safe_areas = HashMap::new();
 
         // Desktop / Default
-        safe_areas.insert("desktop".to_string(), SafeZone { top: 64.0, bottom: 64.0, left: 96.0, right: 96.0, aspect_ratio: "16:9".into() });
+        safe_areas.insert(
+            "desktop".to_string(),
+            SafeZone {
+                top: 64.0,
+                bottom: 64.0,
+                left: 96.0,
+                right: 96.0,
+                aspect_ratio: "16:9".into(),
+            },
+        );
 
         // Mobile (Stories, Shorts, Reels)
-        safe_areas.insert("mobile".to_string(), SafeZone { top: 96.0, bottom: 144.0, left: 64.0, right: 64.0, aspect_ratio: "9:16".into() });
+        safe_areas.insert(
+            "mobile".to_string(),
+            SafeZone {
+                top: 96.0,
+                bottom: 144.0,
+                left: 64.0,
+                right: 64.0,
+                aspect_ratio: "9:16".into(),
+            },
+        );
 
         // YouTube Shorts (Specific Overlays)
-        safe_areas.insert("youtube_shorts".to_string(), SafeZone { top: 120.0, bottom: 200.0, left: 48.0, right: 48.0, aspect_ratio: "9:16".into() });
+        safe_areas.insert(
+            "youtube_shorts".to_string(),
+            SafeZone {
+                top: 120.0,
+                bottom: 200.0,
+                left: 48.0,
+                right: 48.0,
+                aspect_ratio: "9:16".into(),
+            },
+        );
 
         // TikTok (Heavy UI)
-        safe_areas.insert("tiktok".to_string(), SafeZone { top: 100.0, bottom: 180.0, left: 24.0, right: 80.0, aspect_ratio: "9:16".into() });
+        safe_areas.insert(
+            "tiktok".to_string(),
+            SafeZone {
+                top: 100.0,
+                bottom: 180.0,
+                left: 24.0,
+                right: 80.0,
+                aspect_ratio: "9:16".into(),
+            },
+        );
 
         // Instagram Reels
-        safe_areas.insert("instagram_reel".to_string(), SafeZone { top: 120.0, bottom: 160.0, left: 32.0, right: 32.0, aspect_ratio: "9:16".into() });
+        safe_areas.insert(
+            "instagram_reel".to_string(),
+            SafeZone {
+                top: 120.0,
+                bottom: 160.0,
+                left: 32.0,
+                right: 32.0,
+                aspect_ratio: "9:16".into(),
+            },
+        );
 
         // Instagram Story
-        safe_areas.insert("instagram_story".to_string(), SafeZone { top: 100.0, bottom: 120.0, left: 24.0, right: 24.0, aspect_ratio: "9:16".into() });
+        safe_areas.insert(
+            "instagram_story".to_string(),
+            SafeZone {
+                top: 100.0,
+                bottom: 120.0,
+                left: 24.0,
+                right: 24.0,
+                aspect_ratio: "9:16".into(),
+            },
+        );
 
         // LinkedIn (Aggressive Cropping)
-        safe_areas.insert("linkedin".to_string(), SafeZone { top: 40.0, bottom: 40.0, left: 24.0, right: 24.0, aspect_ratio: "16:9".into() });
+        safe_areas.insert(
+            "linkedin".to_string(),
+            SafeZone {
+                top: 40.0,
+                bottom: 40.0,
+                left: 24.0,
+                right: 24.0,
+                aspect_ratio: "16:9".into(),
+            },
+        );
 
         // Twitter
-        safe_areas.insert("twitter".to_string(), SafeZone { top: 32.0, bottom: 32.0, left: 32.0, right: 32.0, aspect_ratio: "16:9".into() });
+        safe_areas.insert(
+            "twitter".to_string(),
+            SafeZone {
+                top: 32.0,
+                bottom: 32.0,
+                left: 32.0,
+                right: 32.0,
+                aspect_ratio: "16:9".into(),
+            },
+        );
 
-        Self { spacing, safe_areas, border_radius, border_width, z_index, layout_widths: HashMap::new() }
+        Self {
+            spacing,
+            safe_areas,
+            border_radius,
+            border_width,
+            z_index,
+            layout_widths: HashMap::new(),
+        }
     }
 }

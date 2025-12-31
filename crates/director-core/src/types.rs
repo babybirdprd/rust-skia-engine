@@ -1,7 +1,21 @@
-use skia_safe::{Path, Color4f};
+//! # Types Module
+//!
+//! Shared data types used across the engine.
+//!
+//! ## Responsibilities
+//! - **Color**: RGBA color representation with Skia conversion.
+//! - **Transform**: Animated 2D transforms (scale, rotation, translation).
+//! - **ObjectFit**: Image/video scaling modes (Cover, Contain, Fill).
+//!
+//! ## Key Types
+//! - `Color`: Float-based RGBA color.
+//! - `Transform`: All animated transform properties.
+//! - `NodeId`: Type alias for arena indices (`usize`).
+
 use crate::animation::Animated;
 use keyframe::CanTween;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use skia_safe::{Color4f, Path};
 
 /// Specifies how the content of a replaceable element (img, video) should
 /// be resized to fit its container.
@@ -79,8 +93,18 @@ pub struct Color {
 }
 
 impl Color {
-    pub const BLACK: Color = Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
-    pub const WHITE: Color = Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
+    pub const BLACK: Color = Color {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+        a: 1.0,
+    };
+    pub const WHITE: Color = Color {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+        a: 1.0,
+    };
 
     pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }

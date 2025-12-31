@@ -1,3 +1,17 @@
+//! # Animation Module
+//!
+//! Keyframe and spring-based animation system.
+//!
+//! ## Responsibilities
+//! - **Animated<T>**: Generic animated value with keyframe segments.
+//! - **Easing**: All easing functions (linear, ease_in_out, elastic, bounce, etc.).
+//! - **Spring Physics**: Critically-damped spring for smooth animations.
+//!
+//! ## Key Types
+//! - `Animated<T>`: Holds keyframes and evaluates at a given time.
+//! - `EasingType`: Enum of all supported easing functions.
+//! - `SpringConfig`: Configuration for spring animations.
+
 use keyframe::{AnimationSequence, CanTween, EasingFunction, Keyframe};
 use serde::{Deserialize, Serialize};
 use std::fmt;

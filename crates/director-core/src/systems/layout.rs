@@ -1,3 +1,15 @@
+//! # Layout System
+//!
+//! CSS Flexbox layout via Taffy.
+//!
+//! ## Responsibilities
+//! - **Layout Computation**: Runs Taffy on the scene graph each frame.
+//! - **Style Mapping**: Converts node styles to Taffy `Style`.
+//! - **Intrinsic Sizing**: Handles `needs_measure()` nodes (text, images).
+//!
+//! ## Key Types
+//! - `LayoutEngine`: Manages the Taffy tree and layout cache.
+
 use crate::scene::SceneGraph;
 use crate::types::NodeId;
 use taffy::prelude::*;

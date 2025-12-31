@@ -1,3 +1,16 @@
+//! # Scripting Module
+//!
+//! Rhai scripting API bindings.
+//!
+//! ## Responsibilities
+//! - **Engine Setup**: Registers all types and functions with Rhai.
+//! - **Node Creation**: `create_box`, `create_text`, `create_image`, etc.
+//! - **Animation**: `animate_*` property setters.
+//! - **Director Control**: `set_duration`, `add_scene`, timeline manipulation.
+//!
+//! ## Pattern
+//! All bindings follow: `engine.register_fn("name", |ctx, ...| { ... })`
+
 use crate::animation::{Animated, EasingType, TweenableVector};
 use crate::director::{Director, TimelineItem, Transition, TransitionType};
 use crate::element::{Element, TextFit, TextShadow, TextSpan};
