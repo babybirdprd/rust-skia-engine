@@ -1,10 +1,14 @@
 use crate::animation::Animated;
 use crate::element::{Element, TextFit, TextShadow, TextSpan};
+use crate::node::text_animator::{
+    parse_text_anim_property, GlyphAnimState, TextAnimProperty, TextAnimator,
+};
 use crate::types::Color;
 use skia_safe::{
-    image_filters, textlayout::{
-        FontCollection, Paragraph, ParagraphBuilder, ParagraphStyle, TextStyle, TextAlign,
-        TextDirection, TextHeightBehavior, StrutStyle,
+    image_filters,
+    textlayout::{
+        FontCollection, Paragraph, ParagraphBuilder, ParagraphStyle, RectHeightStyle,
+        RectWidthStyle, StrutStyle, TextAlign, TextDirection, TextHeightBehavior, TextStyle,
     },
     Canvas, Paint, PaintStyle, Rect, TileMode,
 };
@@ -14,6 +18,17 @@ use std::sync::{Arc, Mutex};
 use taffy::geometry::Size;
 use taffy::style::{AvailableSpace, Style};
 use tracing::warn;
+
+/// Per-glyph position data extracted from SkParagraph.
+#[derive(Clone, Debug)]
+pub struct GlyphInfo {
+    /// Character index in the source text
+    pub char_index: usize,
+    /// Bounding rectangle for this glyph
+    pub rect: Rect,
+    /// Text direction (LTR or RTL)
+    pub direction: TextDirection,
+}
 
 /// A node for rendering rich text using Skia's native text layout engine (SkParagraph).
 pub struct TextNode {
@@ -33,6 +48,12 @@ pub struct TextNode {
     pub dirty_layout: bool,
     pub last_layout_rect: Rect,
     pub style: Style,
+
+    // Kinetic Typography
+    /// Active per-glyph animators
+    pub animators: Vec<TextAnimator>,
+    /// Current animation time (set by update(), used by render())
+    pub current_time: f64,
 }
 
 impl Clone for TextNode {
@@ -50,6 +71,8 @@ impl Clone for TextNode {
             dirty_layout: true,
             last_layout_rect: Rect::default(),
             style: self.style.clone(),
+            animators: self.animators.clone(),
+            current_time: self.current_time,
         }
     }
 }
@@ -64,10 +87,7 @@ impl fmt::Debug for TextNode {
 }
 
 impl TextNode {
-    pub fn new(
-        spans: Vec<TextSpan>,
-        font_collection: Arc<Mutex<FontCollection>>,
-    ) -> Self {
+    pub fn new(spans: Vec<TextSpan>, font_collection: Arc<Mutex<FontCollection>>) -> Self {
         let mut node = Self {
             spans,
             default_font_size: Animated::new(20.0),
@@ -81,6 +101,8 @@ impl TextNode {
             dirty_layout: true,
             last_layout_rect: Rect::default(),
             style: Style::default(),
+            animators: Vec::new(),
+            current_time: 0.0,
         };
         node.init_paragraph();
         node
@@ -121,7 +143,9 @@ impl TextNode {
             let mut text_style = TextStyle::new();
 
             // 1. Font Size
-            let size = span.font_size.unwrap_or(self.default_font_size.current_value);
+            let size = span
+                .font_size
+                .unwrap_or(self.default_font_size.current_value);
             text_style.set_font_size(size);
 
             // 2. Font Family
@@ -157,7 +181,11 @@ impl TextNode {
                 } else {
                     skia_safe::font_style::Slant::Upright
                 };
-                text_style.set_font_style(skia_safe::FontStyle::new(weight, skia_safe::font_style::Width::NORMAL, slant));
+                text_style.set_font_style(skia_safe::FontStyle::new(
+                    weight,
+                    skia_safe::font_style::Width::NORMAL,
+                    slant,
+                ));
             }
 
             // 6. Stroke (Rich Text)
@@ -170,9 +198,9 @@ impl TextNode {
                     if let Some(sc) = span.stroke_color {
                         stroke_paint.set_color(sc.to_skia());
                     } else {
-                         stroke_paint.set_color(skia_safe::Color::BLACK);
+                        stroke_paint.set_color(skia_safe::Color::BLACK);
                     }
-                     text_style.set_foreground_paint(&stroke_paint);
+                    text_style.set_foreground_paint(&stroke_paint);
                 }
             }
 
@@ -195,6 +223,179 @@ impl TextNode {
             drop(p_guard);
             let mut p_guard = self.paragraph.lock().unwrap();
             *p_guard = Some(self.build_paragraph());
+        }
+    }
+
+    /// Returns the total number of characters across all spans.
+    pub fn get_total_char_count(&self) -> usize {
+        self.spans.iter().map(|s| s.text.chars().count()).sum()
+    }
+
+    /// Extracts per-glyph bounding boxes from the laid-out paragraph.
+    ///
+    /// Must be called after layout to get accurate positions.
+    pub fn get_glyph_rects(&self, layout_width: f32) -> Vec<GlyphInfo> {
+        self.ensure_paragraph_ready();
+        let mut p_guard = self.paragraph.lock().unwrap();
+
+        let Some(paragraph) = p_guard.as_mut() else {
+            return Vec::new();
+        };
+
+        // Ensure paragraph is laid out
+        paragraph.layout(layout_width);
+
+        let char_count = self.get_total_char_count();
+        let mut glyphs = Vec::with_capacity(char_count);
+
+        for i in 0..char_count {
+            // Get bounding box for this single character
+            let text_boxes = paragraph.get_rects_for_range(
+                i..i + 1,
+                RectHeightStyle::Tight,
+                RectWidthStyle::Tight,
+            );
+
+            if let Some(text_box) = text_boxes.first() {
+                glyphs.push(GlyphInfo {
+                    char_index: i,
+                    rect: text_box.rect,
+                    direction: text_box.direct,
+                });
+            }
+        }
+
+        glyphs
+    }
+
+    /// Computes the animated state for all glyphs at the given time.
+    pub fn compute_glyph_states(&self, time: f64) -> Vec<GlyphAnimState> {
+        let char_count = self.get_total_char_count();
+        let mut states: Vec<GlyphAnimState> = (0..char_count)
+            .map(|_| GlyphAnimState::identity())
+            .collect();
+
+        for animator in &self.animators {
+            // Apply this animator to affected glyphs
+            for char_idx in animator.start_idx..animator.end_idx.min(char_count) {
+                let glyph_offset = char_idx - animator.start_idx;
+                let value = animator.value_for_glyph(glyph_offset, time);
+
+                match animator.property {
+                    TextAnimProperty::Opacity => states[char_idx].opacity = value,
+                    TextAnimProperty::OffsetX => states[char_idx].offset_x = value,
+                    TextAnimProperty::OffsetY => states[char_idx].offset_y = value,
+                    TextAnimProperty::Scale => states[char_idx].scale = value,
+                    TextAnimProperty::Rotation => states[char_idx].rotation = value,
+                }
+            }
+        }
+
+        states
+    }
+
+    /// Renders text with per-glyph animations applied.
+    ///
+    /// This is slower than the standard paragraph.paint() but enables
+    /// kinetic typography effects like karaoke and wave animations.
+    fn render_per_glyph(
+        &self,
+        canvas: &Canvas,
+        rect: Rect,
+        base_opacity: f32,
+        paragraph: &mut Paragraph,
+    ) {
+        // Get glyph positions
+        let char_count = self.get_total_char_count();
+        if char_count == 0 {
+            return;
+        }
+
+        // Compute animated states for all glyphs
+        let states = self.compute_glyph_states(self.current_time);
+
+        // Get the full text for drawing
+        let full_text: String = self.spans.iter().map(|s| s.text.as_str()).collect();
+        let chars: Vec<char> = full_text.chars().collect();
+
+        // Get glyph rects
+        for (i, _ch) in chars.iter().enumerate() {
+            let state = states
+                .get(i)
+                .cloned()
+                .unwrap_or_else(GlyphAnimState::identity);
+
+            // Skip invisible glyphs
+            if state.opacity <= 0.001 {
+                continue;
+            }
+
+            // Get bounding box for this character
+            let text_boxes = paragraph.get_rects_for_range(
+                i..i + 1,
+                RectHeightStyle::Tight,
+                RectWidthStyle::Tight,
+            );
+
+            let Some(text_box) = text_boxes.first() else {
+                continue;
+            };
+
+            let glyph_rect = text_box.rect;
+            let center_x = glyph_rect.left + glyph_rect.width() / 2.0;
+            let center_y = glyph_rect.top + glyph_rect.height() / 2.0;
+
+            canvas.save();
+
+            // Apply transforms relative to glyph center
+            canvas.translate((
+                rect.x() + center_x + state.offset_x,
+                rect.y() + center_y + state.offset_y,
+            ));
+
+            if (state.rotation).abs() > 0.001 {
+                canvas.rotate(state.rotation, None);
+            }
+
+            if (state.scale - 1.0).abs() > 0.001 {
+                canvas.scale((state.scale, state.scale));
+            }
+
+            // Move back from center
+            canvas.translate((-center_x, -center_y));
+
+            // Create paint with combined opacity
+            let final_opacity = base_opacity * state.opacity;
+            if final_opacity < 1.0 {
+                let mut paint = Paint::default();
+                paint.set_alpha_f(final_opacity);
+
+                // Draw single character paragraph
+                // We use a layer for opacity
+                let layer_bounds = Rect::from_xywh(
+                    glyph_rect.left - 5.0,
+                    glyph_rect.top - 5.0,
+                    glyph_rect.width() + 10.0,
+                    glyph_rect.height() + 10.0,
+                );
+                canvas.save_layer(
+                    &skia_safe::canvas::SaveLayerRec::default()
+                        .bounds(&layer_bounds)
+                        .paint(&paint),
+                );
+
+                // Paint the full paragraph but clipped to this character
+                // Note: This is a workaround - ideally we'd draw just one glyph
+                canvas.clip_rect(glyph_rect, skia_safe::ClipOp::Intersect, true);
+                paragraph.paint(canvas, (0.0, 0.0));
+
+                canvas.restore(); // layer
+            } else {
+                canvas.clip_rect(glyph_rect, skia_safe::ClipOp::Intersect, true);
+                paragraph.paint(canvas, (0.0, 0.0));
+            }
+
+            canvas.restore();
         }
     }
 }
@@ -251,6 +452,9 @@ impl Element for TextNode {
     }
 
     fn update(&mut self, time: f64) -> bool {
+        // Store time for render to use
+        self.current_time = time;
+
         let old_size = self.default_font_size.current_value;
         let old_color = self.default_color.current_value;
 
@@ -266,7 +470,12 @@ impl Element for TextNode {
 
         // Color::PartialEq is derived, compares float fields exactly.
         if self.default_color.current_value != old_color {
-             changed = true;
+            changed = true;
+        }
+
+        // If we have animators, always mark as changed during animation
+        if !self.animators.is_empty() {
+            changed = true;
         }
 
         if changed {
@@ -334,29 +543,40 @@ impl Element for TextNode {
             canvas.save();
 
             if let Some(shadow) = &self.shadow {
-                 let mut shadow_paint = Paint::default();
-                 shadow_paint.set_color(shadow.color.to_skia());
-                 shadow_paint.set_alpha_f(opacity);
-                 shadow_paint.set_image_filter(image_filters::blur(
+                let mut shadow_paint = Paint::default();
+                shadow_paint.set_color(shadow.color.to_skia());
+                shadow_paint.set_alpha_f(opacity);
+                shadow_paint.set_image_filter(image_filters::blur(
                     (shadow.blur, shadow.blur),
                     TileMode::Decal,
                     None,
                     None,
                 ));
 
-                 // Manual shadow rendering isn't easy with SkParagraph + Paint.
-                 // We will skip shadow rendering for this PR as per plan,
-                 // or accept it might not work fully without layer.
+                // Manual shadow rendering isn't easy with SkParagraph + Paint.
+                // We will skip shadow rendering for this PR as per plan,
+                // or accept it might not work fully without layer.
             }
 
-            if opacity < 1.0 {
-                let mut paint = Paint::default();
-                paint.set_alpha_f(opacity);
-                canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().bounds(&rect).paint(&paint));
-                paragraph.paint(canvas, (rect.x(), rect.y()));
-                canvas.restore();
+            // Check if we need per-glyph rendering
+            if !self.animators.is_empty() {
+                // Per-glyph rendering path
+                self.render_per_glyph(canvas, rect, opacity, paragraph);
             } else {
-                paragraph.paint(canvas, (rect.x(), rect.y()));
+                // Fast path: no animators, use standard paragraph.paint()
+                if opacity < 1.0 {
+                    let mut paint = Paint::default();
+                    paint.set_alpha_f(opacity);
+                    canvas.save_layer(
+                        &skia_safe::canvas::SaveLayerRec::default()
+                            .bounds(&rect)
+                            .paint(&paint),
+                    );
+                    paragraph.paint(canvas, (rect.x(), rect.y()));
+                    canvas.restore();
+                } else {
+                    paragraph.paint(canvas, (rect.x(), rect.y()));
+                }
             }
 
             canvas.restore();
@@ -374,27 +594,43 @@ impl Element for TextNode {
         duration: f64,
         easing: &str,
     ) {
-         match property {
+        match property {
             "font_size" | "size" => {
                 let ease_fn = crate::node::parse_easing(easing);
-                self.default_font_size.add_segment(start, target, duration, ease_fn);
+                self.default_font_size
+                    .add_segment(start, target, duration, ease_fn);
                 self.dirty_layout = true;
             }
             _ => {}
         }
     }
 
-    // Stub for animations
     fn add_text_animator(
         &mut self,
-        _start_idx: usize,
-        _end_idx: usize,
-        _property: String,
-        _start_val: f32,
-        _target_val: f32,
-        _duration: f64,
-        _easing: &str,
+        start_idx: usize,
+        end_idx: usize,
+        property: String,
+        start_val: f32,
+        target_val: f32,
+        duration: f64,
+        easing: &str,
     ) {
-        warn!("Text animators are temporarily disabled in the new layout engine.");
+        // Parse property name
+        let Some(prop) = parse_text_anim_property(&property) else {
+            warn!("Unknown text animation property: {}", property);
+            return;
+        };
+
+        // Parse easing
+        let ease_fn = crate::node::parse_easing(easing);
+
+        // Create animator with default stagger of 0.0 (all at once)
+        // Advanced stagger can be added via a separate API
+        let animator = TextAnimator::new(
+            start_idx, end_idx, prop, start_val, target_val, duration, ease_fn,
+            0.0, // Default: no stagger
+        );
+
+        self.animators.push(animator);
     }
 }

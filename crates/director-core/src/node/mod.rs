@@ -5,6 +5,9 @@ use skia_safe::Rect;
 pub mod text;
 pub use text::TextNode;
 
+pub mod text_animator;
+pub use text_animator::{parse_text_anim_property, GlyphAnimState, TextAnimProperty, TextAnimator};
+
 pub mod vector;
 pub use vector::VectorNode;
 
@@ -24,8 +27,7 @@ pub mod composition;
 pub use composition::CompositionNode;
 
 pub mod effect;
-pub use effect::{EffectNode, EffectType, ShaderUniform, build_effect_filter};
-
+pub use effect::{build_effect_filter, EffectNode, EffectType, ShaderUniform};
 
 // Helper to parse easing
 pub fn parse_easing(e: &str) -> EasingType {
@@ -39,12 +41,7 @@ pub fn parse_easing(e: &str) -> EasingType {
     }
 }
 
-pub fn calculate_object_fit_rect(
-    src_w: f32,
-    src_h: f32,
-    dst_rect: Rect,
-    fit: ObjectFit,
-) -> Rect {
+pub fn calculate_object_fit_rect(src_w: f32, src_h: f32, dst_rect: Rect, fit: ObjectFit) -> Rect {
     match fit {
         ObjectFit::Fill => dst_rect,
         ObjectFit::Contain | ObjectFit::Cover => {
