@@ -3,11 +3,12 @@ use director_core::element::TextSpan;
 use director_core::node::video_node::VideoSource;
 use director_core::node::{BoxNode, ImageNode, LottieNode, TextNode, VectorNode, VideoNode};
 use director_core::node::{EffectNode, EffectType};
+use director_core::systems::transitions::{Transition, TransitionType as CoreTransitionType};
 use director_core::types::{Color, NodeId, ObjectFit};
 use director_core::video_wrapper::RenderMode;
 use director_core::{AssetLoader, Director, Element};
 use director_schema::{
-    Animation, EffectConfig, MovieRequest, Node, NodeKind, StyleMap, TransformMap,
+    Animation, EffectConfig, MovieRequest, Node, NodeKind, StyleMap, TransformMap, TransitionType,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -29,16 +30,18 @@ pub fn load_movie(request: MovieRequest, loader: Arc<dyn AssetLoader>) -> Direct
         None,
     );
 
-    for scene_data in request.scenes {
+    // Build transition list from scene configs
+    let mut scene_end_times = Vec::new();
+    let mut cumulative_time = 0.0;
+
+    for scene_data in &request.scenes {
         // Build the scene graph for this scene
         let root_id = build_node_recursive(&mut director, &scene_data.root);
 
         // Calculate start time based on previous scenes
-        let start_time = director
-            .timeline
-            .last()
-            .map(|i| i.start_time + i.duration)
-            .unwrap_or(0.0);
+        let start_time = cumulative_time;
+        cumulative_time += scene_data.duration_secs;
+        scene_end_times.push(start_time + scene_data.duration_secs);
 
         // Add to timeline
         director
@@ -52,7 +55,36 @@ pub fn load_movie(request: MovieRequest, loader: Arc<dyn AssetLoader>) -> Direct
             });
     }
 
+    // Wire up transitions between scenes
+    for (i, scene_data) in request.scenes.iter().enumerate() {
+        if let Some(trans) = &scene_data.transition {
+            if i + 1 < request.scenes.len() {
+                let transition_start = scene_end_times[i] - trans.duration;
+                director.transitions.push(Transition {
+                    from_scene_idx: i,
+                    to_scene_idx: i + 1,
+                    start_time: transition_start,
+                    duration: trans.duration,
+                    kind: convert_transition_type(&trans.kind),
+                    easing: trans.easing.clone(),
+                });
+            }
+        }
+    }
+
     director
+}
+
+/// Converts schema TransitionType to core TransitionType
+fn convert_transition_type(kind: &TransitionType) -> CoreTransitionType {
+    match kind {
+        TransitionType::Fade => CoreTransitionType::Fade,
+        TransitionType::SlideLeft => CoreTransitionType::SlideLeft,
+        TransitionType::SlideRight => CoreTransitionType::SlideRight,
+        TransitionType::WipeLeft => CoreTransitionType::WipeLeft,
+        TransitionType::WipeRight => CoreTransitionType::WipeRight,
+        TransitionType::CircleOpen => CoreTransitionType::CircleOpen,
+    }
 }
 
 fn build_node_recursive(director: &mut Director, node_def: &Node) -> NodeId {
@@ -137,6 +169,16 @@ fn build_node_recursive(director: &mut Director, node_def: &Node) -> NodeId {
             }
         }
         NodeKind::Effect { effect_type } => {
+            // Color matrix presets
+            const GRAYSCALE_MATRIX: [f32; 20] = [
+                0.2126, 0.7152, 0.0722, 0.0, 0.0, 0.2126, 0.7152, 0.0722, 0.0, 0.0, 0.2126, 0.7152,
+                0.0722, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+            ];
+            const SEPIA_MATRIX: [f32; 20] = [
+                0.393, 0.769, 0.189, 0.0, 0.0, 0.349, 0.686, 0.168, 0.0, 0.0, 0.272, 0.534, 0.131,
+                0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+            ];
+
             // Create EffectNode based on effect configuration
             let effect = match effect_type {
                 EffectConfig::Blur { sigma } => EffectType::Blur(Animated::new(*sigma)),
@@ -150,6 +192,22 @@ fn build_node_recursive(director: &mut Director, node_def: &Node) -> NodeId {
                     offset_x: Animated::new(*offset_x),
                     offset_y: Animated::new(*offset_y),
                     color: Animated::new(color.unwrap_or(Color::BLACK)),
+                },
+                EffectConfig::ColorMatrix { matrix } => EffectType::ColorMatrix(matrix.clone()),
+                EffectConfig::Grayscale => EffectType::ColorMatrix(GRAYSCALE_MATRIX.to_vec()),
+                EffectConfig::Sepia => EffectType::ColorMatrix(SEPIA_MATRIX.to_vec()),
+                EffectConfig::DirectionalBlur {
+                    strength,
+                    angle,
+                    samples,
+                } => EffectType::DirectionalBlur {
+                    strength: Animated::new(*strength),
+                    angle: Animated::new(*angle),
+                    samples: *samples,
+                },
+                EffectConfig::FilmGrain { intensity, size } => EffectType::FilmGrain {
+                    intensity: Animated::new(*intensity),
+                    size: Animated::new(*size),
                 },
             };
             Box::new(EffectNode {

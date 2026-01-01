@@ -13,12 +13,45 @@ pub struct MovieRequest {
     pub audio_tracks: Vec<AudioTrack>,
 }
 
+/// Visual transition type between scenes.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TransitionType {
+    #[default]
+    Fade,
+    SlideLeft,
+    SlideRight,
+    WipeLeft,
+    WipeRight,
+    CircleOpen,
+}
+
+/// Configuration for a scene-to-scene transition.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TransitionConfig {
+    /// Transition type
+    #[serde(rename = "type")]
+    pub kind: TransitionType,
+    /// Duration in seconds
+    pub duration: f64,
+    /// Easing function (default: Linear)
+    #[serde(default = "default_easing")]
+    pub easing: EasingType,
+}
+
+fn default_easing() -> EasingType {
+    EasingType::Linear
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Scene {
     pub id: String,
     pub duration_secs: f64,
     pub background: Option<Color>,
     pub root: Node,
+    /// Transition to the next scene (optional)
+    #[serde(default)]
+    pub transition: Option<TransitionConfig>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -122,10 +155,52 @@ pub enum EffectConfig {
         #[serde(default)]
         color: Option<Color>,
     },
+    /// Custom 4x5 color matrix transform (20 floats).
+    ColorMatrix {
+        /// The 20-element color matrix [R, G, B, A, Offset] x 4 rows
+        matrix: Vec<f32>,
+    },
+    /// Grayscale preset (convenience wrapper for ColorMatrix).
+    Grayscale,
+    /// Sepia tone preset (convenience wrapper for ColorMatrix).
+    Sepia,
+    /// Directional blur (motion blur) along an angle.
+    DirectionalBlur {
+        /// Blur strength (pixel distance). Default: 10.0
+        #[serde(default = "default_blur")]
+        strength: f32,
+        /// Direction angle in degrees (0 = right, 90 = down). Default: 0.0
+        #[serde(default)]
+        angle: f32,
+        /// Number of samples (quality vs performance, 4-64). Default: 16
+        #[serde(default = "default_samples")]
+        samples: u32,
+    },
+    /// Film grain / noise overlay for cinematic look.
+    FilmGrain {
+        /// Grain intensity (0.0 - 1.0). Default: 0.1
+        #[serde(default = "default_grain_intensity")]
+        intensity: f32,
+        /// Grain size/scale in pixels. Default: 1.0
+        #[serde(default = "default_grain_size")]
+        size: f32,
+    },
 }
 
 fn default_blur() -> f32 {
     10.0
+}
+
+fn default_samples() -> u32 {
+    16
+}
+
+fn default_grain_intensity() -> f32 {
+    0.1
+}
+
+fn default_grain_size() -> f32 {
+    1.0
 }
 
 // Simplified Style Map for JSON (maps to Taffy later)
@@ -308,6 +383,7 @@ mod tests {
                         children: vec![],
                     }],
                 },
+                transition: None,
             }],
             audio_tracks: vec![],
         };
@@ -317,5 +393,83 @@ mod tests {
 
         // Ensure we can read it back
         let _loaded: MovieRequest = serde_json::from_str(&json).unwrap();
+    }
+
+    #[test]
+    fn test_effect_config_serialization() {
+        // Test each EffectConfig variant roundtrips correctly
+        let effects = vec![
+            EffectConfig::Blur { sigma: 15.0 },
+            EffectConfig::DropShadow {
+                blur: 10.0,
+                offset_x: 5.0,
+                offset_y: 5.0,
+                color: Some(Color::BLACK),
+            },
+            EffectConfig::ColorMatrix {
+                matrix: vec![1.0; 20],
+            },
+            EffectConfig::Grayscale,
+            EffectConfig::Sepia,
+            EffectConfig::DirectionalBlur {
+                strength: 20.0,
+                angle: 45.0,
+                samples: 32,
+            },
+            EffectConfig::FilmGrain {
+                intensity: 0.15,
+                size: 2.0,
+            },
+        ];
+
+        for effect in effects {
+            let json = serde_json::to_string(&effect).unwrap();
+            let loaded: EffectConfig = serde_json::from_str(&json).unwrap();
+            // Verify via debug output that it roundtrips
+            assert_eq!(format!("{:?}", effect), format!("{:?}", loaded));
+        }
+    }
+
+    #[test]
+    fn test_transition_config_serialization() {
+        // Test each TransitionType variant roundtrips correctly
+        let transitions = vec![
+            TransitionConfig {
+                kind: TransitionType::Fade,
+                duration: 1.0,
+                easing: EasingType::Linear,
+            },
+            TransitionConfig {
+                kind: TransitionType::SlideLeft,
+                duration: 0.5,
+                easing: EasingType::EaseInOut,
+            },
+            TransitionConfig {
+                kind: TransitionType::SlideRight,
+                duration: 0.75,
+                easing: EasingType::BounceOut,
+            },
+            TransitionConfig {
+                kind: TransitionType::WipeLeft,
+                duration: 1.0,
+                easing: EasingType::Linear,
+            },
+            TransitionConfig {
+                kind: TransitionType::WipeRight,
+                duration: 1.0,
+                easing: EasingType::Linear,
+            },
+            TransitionConfig {
+                kind: TransitionType::CircleOpen,
+                duration: 2.0,
+                easing: EasingType::EaseOut,
+            },
+        ];
+
+        for trans in transitions {
+            let json = serde_json::to_string(&trans).unwrap();
+            let loaded: TransitionConfig = serde_json::from_str(&json).unwrap();
+            assert_eq!(format!("{:?}", trans), format!("{:?}", loaded));
+        }
     }
 }
