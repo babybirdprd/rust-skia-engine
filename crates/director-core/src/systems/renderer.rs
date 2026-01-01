@@ -138,16 +138,28 @@ pub fn render_export(
 
     let samples_per_frame = (director.audio_mixer.sample_rate as f64 / fps as f64).round() as usize;
 
+    // Pre-allocate transition surfaces to avoid per-frame allocation churn
+    let mut transition_surfaces = if !director.transitions.is_empty() {
+        let surf_a =
+            skia_safe::surfaces::raster(&info, None, None).ok_or(RenderError::SurfaceFailure)?;
+        let surf_b =
+            skia_safe::surfaces::raster(&info, None, None).ok_or(RenderError::SurfaceFailure)?;
+        Some((surf_a, surf_b))
+    } else {
+        None
+    };
+
     // Destructure director only where needed or create refs
 
     for i in 0..total_frames {
         let frame_start_time = i as f64 / fps as f64;
         let shutter_start_time = frame_start_time - (shutter_duration / 2.0);
 
-        let mut render_at_time = |director: &mut Director,
-                                  layout_engine: &mut LayoutEngine,
-                                  time: f64,
-                                  canvas: &skia_safe::Canvas|
+        let render_at_time = |director: &mut Director,
+                              layout_engine: &mut LayoutEngine,
+                              time: f64,
+                              canvas: &skia_safe::Canvas,
+                              surfaces: &mut Option<(skia_safe::Surface, skia_safe::Surface)>|
          -> Result<(), RenderError> {
             director.update(time);
             layout_engine.compute_layout(
@@ -187,28 +199,22 @@ pub fn render_export(
                 for (idx, item) in items {
                     if idx == trans.from_scene_idx || idx == trans.to_scene_idx {
                         if !drawn_transition {
-                            let info = skia_safe::ImageInfo::new(
-                                (director.width, director.height),
-                                ColorType::RGBA8888,
-                                AlphaType::Premul,
-                                Some(ColorSpace::new_srgb()),
-                            );
-
-                            if let (Some(mut surf_a), Some(mut surf_b)) = (
-                                skia_safe::surfaces::raster(&info, None, None),
-                                skia_safe::surfaces::raster(&info, None, None),
-                            ) {
+                            if let Some((surf_a, surf_b)) = surfaces {
                                 // Render A & B
                                 if let (Some(item_a), Some(item_b)) = (
                                     director.timeline.get(trans.from_scene_idx),
                                     director.timeline.get(trans.to_scene_idx),
                                 ) {
+                                    surf_a.canvas().clear(skia_safe::Color::TRANSPARENT);
+                                    surf_b.canvas().clear(skia_safe::Color::TRANSPARENT);
+
                                     render_recursive(
                                         &director.scene,
                                         assets_ref,
                                         item_a.scene_root,
                                         surf_a.canvas(),
                                         1.0,
+                                        0,
                                     )?;
                                     render_recursive(
                                         &director.scene,
@@ -216,6 +222,7 @@ pub fn render_export(
                                         item_b.scene_root,
                                         surf_b.canvas(),
                                         1.0,
+                                        0,
                                     )?;
 
                                     let img_a = surf_a.image_snapshot();
@@ -246,12 +253,13 @@ pub fn render_export(
                             item.scene_root,
                             canvas,
                             1.0,
+                            0,
                         )?;
                     }
                 }
             } else {
                 for (_, item) in items {
-                    render_recursive(&director.scene, assets_ref, item.scene_root, canvas, 1.0)?;
+                    render_recursive(&director.scene, assets_ref, item.scene_root, canvas, 1.0, 0)?;
                 }
             }
             if time < 0.1 {
@@ -266,6 +274,7 @@ pub fn render_export(
                 &mut layout_engine,
                 frame_start_time,
                 surface.canvas(),
+                &mut transition_surfaces,
             )?;
         } else {
             let scratch_surface = accumulation_surface.as_mut().unwrap();
@@ -284,6 +293,7 @@ pub fn render_export(
                     &mut layout_engine,
                     sample_time,
                     scratch_surface.canvas(),
+                    &mut transition_surfaces,
                 )?;
 
                 let weight = 1.0 / (s as f32 + 1.0);
@@ -342,7 +352,11 @@ pub fn render_recursive(
     node_id: NodeId,
     canvas: &skia_safe::Canvas,
     parent_opacity: f32,
+    depth: usize,
 ) -> Result<(), RenderError> {
+    if depth > 100 {
+        return Err(RenderError::RecursionLimit);
+    }
     if let Some(node) = scene.get_node(node_id) {
         canvas.save();
 
@@ -399,7 +413,9 @@ pub fn render_recursive(
             sorted_children.sort_by_key(|k| k.1);
 
             for (child_id, _) in sorted_children {
-                if let Err(e) = render_recursive(scene, assets, child_id, canvas, parent_opacity) {
+                if let Err(e) =
+                    render_recursive(scene, assets, child_id, canvas, parent_opacity, depth + 1)
+                {
                     last_error = Err(e);
                 }
             }
@@ -430,7 +446,8 @@ pub fn render_recursive(
                     // Create a layer for the mask, which will composite onto the content with DstIn
                     canvas
                         .save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&mask_paint));
-                    if let Err(e) = render_recursive(scene, assets, mask_id, canvas, 1.0) {
+                    if let Err(e) = render_recursive(scene, assets, mask_id, canvas, 1.0, depth + 1)
+                    {
                         last_error = Err(e);
                     }
                     canvas.restore();
@@ -628,7 +645,7 @@ pub fn render_frame(
     items.sort_by_key(|(_, item)| item.z_index);
 
     for (_, item) in items {
-        render_recursive(&director.scene, assets, item.scene_root, canvas, 1.0)?;
+        render_recursive(&director.scene, assets, item.scene_root, canvas, 1.0, 0)?;
     }
     Ok(())
 }

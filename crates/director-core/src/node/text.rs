@@ -633,4 +633,26 @@ impl Element for TextNode {
 
         self.animators.push(animator);
     }
+
+    fn add_text_animator_full(
+        &mut self,
+        start_idx: usize,
+        end_idx: usize,
+        property: String,
+        start_val: f32,
+        target_val: f32,
+        duration: f64,
+        easing: &str,
+        stagger: f32,
+    ) {
+        let Some(prop) = parse_text_anim_property(&property) else {
+            warn!("Unknown text animation property: {}", property);
+            return;
+        };
+        let ease_fn = crate::node::parse_easing(easing);
+        let animator = TextAnimator::new(
+            start_idx, end_idx, prop, start_val, target_val, duration, ease_fn, stagger,
+        );
+        self.animators.push(animator);
+    }
 }

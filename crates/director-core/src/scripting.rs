@@ -13,7 +13,7 @@
 
 use crate::animation::{Animated, EasingType, TweenableVector};
 use crate::director::{Director, TimelineItem, Transition, TransitionType};
-use crate::element::{Element, TextFit, TextShadow, TextSpan};
+use crate::element::{TextFit, TextShadow, TextSpan};
 use crate::node::{
     BoxNode, CompositionNode, EffectNode, EffectType, ImageNode, LottieNode, ShaderUniform,
     TextNode, VectorNode, VideoNode, VideoSource,
@@ -27,7 +27,7 @@ use skia_safe::Path;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use taffy::prelude::*;
-use taffy::style::{GridAutoFlow, GridPlacement, GridTemplateComponent, Style};
+use taffy::style::{GridPlacement, GridTemplateComponent, Style};
 use tracing::error;
 
 /// Wrapper around `Director` for Rhai scripting.
@@ -682,6 +682,7 @@ pub fn create_theme_api(system: DesignSystem) -> Module {
 pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
     let theme_module = create_theme_api(DesignSystem::new());
     engine.register_static_module("theme", theme_module.into());
+    engine.set_max_expr_depths(0, 0);
 
     // Randomness
     engine.register_fn("rand_float", |min: f64, max: f64| {
@@ -1115,30 +1116,6 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
                     d.scene.add_child(parent.id, id);
                     Ok(NodeHandle {
                         director: parent.director.clone(),
-                        id,
-                    })
-                }
-                Err(e) => Err(format!("Failed to parse lottie: {}", e).into()),
-            }
-        },
-    );
-
-    engine.register_fn(
-        "add_lottie",
-        |scene: &mut SceneHandle, path: &str| -> Result<NodeHandle, Box<rhai::EvalAltResult>> {
-            let mut d = scene.director.lock().unwrap();
-            let bytes = d
-                .assets
-                .loader
-                .load_bytes(path)
-                .map_err(|e| e.to_string())?;
-
-            match LottieNode::new(&bytes, HashMap::new(), &d.assets) {
-                Ok(lottie_node) => {
-                    let id = d.scene.add_node(Box::new(lottie_node));
-                    d.scene.add_child(scene.root_id, id);
-                    Ok(NodeHandle {
-                        director: scene.director.clone(),
                         id,
                     })
                 }
@@ -1879,6 +1856,60 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
                     end as f32,
                     dur,
                     ease,
+                );
+            }
+        },
+    );
+
+    engine.register_fn(
+        "add_animator",
+        |node: &mut NodeHandle,
+         start_idx: i64,
+         end_idx: i64,
+         prop: &str,
+         start: f64,
+         end: f64,
+         dur: f64,
+         ease: &str,
+         stagger: f64| {
+            let mut d = node.director.lock().unwrap();
+            if let Some(n) = d.scene.get_node_mut(node.id) {
+                n.element.add_text_animator_full(
+                    start_idx as usize,
+                    end_idx as usize,
+                    prop.to_string(),
+                    start as f32,
+                    end as f32,
+                    dur,
+                    ease,
+                    stagger as f32,
+                );
+            }
+        },
+    );
+
+    engine.register_fn(
+        "add_animator",
+        |node: &mut NodeHandle,
+         start_idx: i64,
+         end_idx: i64,
+         prop: &str,
+         start: i64,
+         end: i64,
+         dur: f64,
+         ease: &str,
+         stagger: f64| {
+            let mut d = node.director.lock().unwrap();
+            if let Some(n) = d.scene.get_node_mut(node.id) {
+                n.element.add_text_animator_full(
+                    start_idx as usize,
+                    end_idx as usize,
+                    prop.to_string(),
+                    start as f32,
+                    end as f32,
+                    dur,
+                    ease,
+                    stagger as f32,
                 );
             }
         },

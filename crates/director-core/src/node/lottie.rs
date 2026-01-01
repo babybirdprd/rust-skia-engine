@@ -171,7 +171,7 @@ impl Element for LottieNode {
         if self.frame.raw_keyframes.len() > 1 {
             player.current_frame = self.frame.current_value;
         } else {
-            let fps = self.asset.frame_rate;
+            let fps = self.asset._frame_rate;
             let start_frame = self.asset.model.ip;
             let end_frame = self.asset.model.op;
 

@@ -169,6 +169,30 @@ pub trait Element: std::fmt::Debug + ElementClone {
         warn!("add_animator called on a non-text node.");
     }
 
+    /// Adds an animator to a specific range of text graphemes with optional stagger.
+    fn add_text_animator_full(
+        &mut self,
+        _start_idx: usize,
+        _end_idx: usize,
+        _property: String,
+        _start_val: f32,
+        _target_val: f32,
+        _duration: f64,
+        _easing: &str,
+        _stagger: f32,
+    ) {
+        // Fallback to simpler version
+        self.add_text_animator(
+            _start_idx,
+            _end_idx,
+            _property,
+            _start_val,
+            _target_val,
+            _duration,
+            _easing,
+        );
+    }
+
     /// Returns audio samples if this element contains audio (e.g., Video or Composition).
     ///
     /// # Arguments

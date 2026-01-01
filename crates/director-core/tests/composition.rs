@@ -54,7 +54,7 @@ main
 
     // Render frame 0
     let mut surface = skia_safe::surfaces::raster_n32_premul((200, 200)).unwrap();
-    render_frame(&mut *director, 0.0, surface.canvas());
+    render_frame(&mut *director, 0.0, surface.canvas()).unwrap();
 
     // Read pixels
     let mut pixels = vec![0u8; 200 * 200 * 4];

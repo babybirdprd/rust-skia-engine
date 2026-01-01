@@ -12,7 +12,7 @@ fn test_render_mock_tree() {
     let height = 500;
 
     let mut surface =
-        Surface::new_raster_n32_premul((width, height)).expect("Failed to create surface");
+        skia_safe::surfaces::raster_n32_premul((width, height)).expect("Failed to create surface");
     let canvas = surface.canvas();
 
     let dest_rect = Rect::from_wh(width as f32, height as f32);

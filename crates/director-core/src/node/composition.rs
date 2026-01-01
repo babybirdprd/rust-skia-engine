@@ -144,7 +144,7 @@ impl Element for CompositionNode {
             items.sort_by_key(|(_, item)| item.z_index);
 
             for (_, item) in items {
-                render_recursive(&d.scene, &d.assets, item.scene_root, c, 1.0)?;
+                render_recursive(&d.scene, &d.assets, item.scene_root, c, 1.0, 0)?;
             }
 
             // Now draw surface to main canvas

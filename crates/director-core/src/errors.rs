@@ -12,4 +12,6 @@ pub enum RenderError {
     IoError(#[from] std::io::Error),
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
+    #[error("Recursion depth limit exceeded")]
+    RecursionLimit,
 }
