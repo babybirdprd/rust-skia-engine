@@ -7,8 +7,9 @@
 //! - **Scene Management**: `add_scene`, `add_transition`
 //! - **Configuration**: `configure_motion_blur`
 
-use crate::director::{Director, TimelineItem, Transition, TransitionType};
+use crate::director::{Director, TimelineItem};
 use crate::node::BoxNode;
+use crate::systems::transitions::{Transition, TransitionType};
 use crate::video_wrapper::RenderMode;
 use crate::AssetLoader;
 use rhai::Engine;

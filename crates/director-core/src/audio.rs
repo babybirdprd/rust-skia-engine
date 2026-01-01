@@ -4,6 +4,7 @@
 //!
 //! ## Responsibilities
 //! - **Audio Mixing**: Combines multiple `AudioTrack`s into final output.
+//! - **Scene Graph Audio**: Collects audio from scene nodes (`mix_scene_audio`).
 //! - **Sync**: Aligns audio with video timeline.
 //! - **Track Management**: Add/remove/seek audio tracks.
 //! - **FFT Analysis**: Compute frequency spectrum for audio-reactive visuals.
@@ -151,6 +152,55 @@ impl AudioMixer {
         }
 
         output
+    }
+}
+
+/// Mixes audio from scene graph nodes into an existing output buffer.
+///
+/// This traverses active scenes and collects audio from any nodes that provide it
+/// (e.g., VideoNode, AudioNode). The collected audio is added to the provided buffer.
+///
+/// # Arguments
+/// * `output` - Mutable buffer to mix audio into (interleaved stereo)
+/// * `scene_nodes` - Reference to the scene graph's node storage
+/// * `active_roots` - List of (root_node_id, local_time) for active scenes
+/// * `samples_needed` - Number of samples per channel
+/// * `sample_rate` - Audio sample rate
+pub fn mix_scene_audio(
+    output: &mut [f32],
+    scene_nodes: &[Option<crate::scene::SceneNode>],
+    active_roots: &[(crate::types::NodeId, f64)],
+    samples_needed: usize,
+    sample_rate: u32,
+) {
+    let mut stack: Vec<(crate::types::NodeId, f64)> = active_roots.to_vec();
+
+    while let Some((id, local_time)) = stack.pop() {
+        if id < scene_nodes.len() {
+            if let Some(node) = &scene_nodes[id] {
+                // Collect audio from this node
+                if let Some(samples) =
+                    node.element
+                        .get_audio(local_time, samples_needed, sample_rate)
+                {
+                    for (i, val) in samples.iter().enumerate() {
+                        if i < output.len() {
+                            output[i] += val;
+                        }
+                    }
+                }
+
+                // Recurse to children
+                for child_id in &node.children {
+                    stack.push((*child_id, local_time));
+                }
+            }
+        }
+    }
+
+    // Final clamp
+    for s in output.iter_mut() {
+        *s = s.clamp(-1.0, 1.0);
     }
 }
 

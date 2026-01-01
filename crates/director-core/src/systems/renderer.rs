@@ -3,32 +3,29 @@
 //! Handles visual output via Skia.
 //!
 //! ## Responsibilities
-//! - **Export Loop**: Iterates frames and encodes to MP4 (`render_export`).
 //! - **Scene Traversal**: Recursively paints `SceneNode`s to Canvas (`render_recursive`).
-//! - **Transitions**: Applies shaders (Fade, Slide, etc.) between scenes.
 //! - **Layer Composition**: Manages canvas save/restore for transforms.
+//! - **Debug Rendering**: Single-frame rendering for previews (`render_frame`).
 //!
 //! ## Key Functions
-//! - `render_export`: Main export entry point, blocking.
 //! - `render_recursive`: Draws a single node hierarchy.
 //! - `render_frame`: Debug helper for single-frame rendering.
+//!
+//! ## See Also
+//! - `export::video` for the full export loop (`render_export`).
+//! - `systems::transitions` for transition shaders.
 
-use crate::audio::load_audio_bytes;
-use crate::director::{Director, TimelineItem, TransitionType};
+use crate::director::{Director, TimelineItem};
 use crate::errors::RenderError;
 use crate::scene::SceneGraph;
 use crate::systems::assets::AssetManager;
 use crate::systems::layout::LayoutEngine;
+use crate::systems::transitions::draw_transition;
 use crate::types::NodeId;
-use crate::video_wrapper::{Encoder, EncoderSettings, Locator, Time};
-use anyhow::Result;
-use ndarray::Array3;
-use skia_safe::{runtime_effect::ChildPtr, AlphaType, ColorSpace, ColorType, Data, RuntimeEffect};
-use std::path::PathBuf;
-use tracing::{debug, error, instrument};
+use tracing::debug;
 
 #[cfg(feature = "vulkan")]
-use skia_safe::gpu::{Budgeted, DirectContext, SurfaceOrigin};
+use skia_safe::gpu::DirectContext;
 
 #[cfg(feature = "vulkan")]
 /// Type alias for the GPU context (Vulkan backend).
@@ -36,312 +33,6 @@ pub type GpuContext = DirectContext;
 #[cfg(not(feature = "vulkan"))]
 /// Placeholder for GPU context when Vulkan feature is disabled.
 pub type GpuContext = ();
-
-/// Renders the entire movie to a video file (MP4).
-///
-/// This is a long-running blocking operation that:
-/// 1. Initializes the video encoder (FFmpeg).
-/// 2. Iterates through every frame of the timeline.
-/// 3. Updates the Scene Graph (Update -> Layout -> PostLayout).
-/// 4. Rasterizes the scene to a Skia Surface.
-/// 5. Handles Motion Blur via accumulation buffer (if configured).
-/// 6. Sends pixels to the encoder.
-/// 7. Mixes and encodes audio.
-///
-/// # Arguments
-/// * `director` - The director instance containing the movie state.
-/// * `out_path` - Destination path for the .mp4 file.
-/// * `gpu_context` - Optional GPU context for hardware acceleration.
-/// * `audio_track_path` - Optional path to a background audio track (deprecated; use `director.add_global_audio`).
-#[allow(unused_variables)]
-#[instrument(level = "info", skip(director, gpu_context), fields(width = director.width, height = director.height, fps = director.fps))]
-pub fn render_export(
-    director: &mut Director,
-    out_path: PathBuf,
-    gpu_context: Option<&mut GpuContext>,
-    audio_track_path: Option<PathBuf>,
-) -> Result<()> {
-    let width = director.width;
-    let height = director.height;
-    let fps = director.fps;
-
-    let mut max_duration = 0.0;
-    for item in &director.timeline {
-        let end = item.start_time + item.duration;
-        if end > max_duration {
-            max_duration = end;
-        }
-    }
-    if max_duration == 0.0 {
-        max_duration = 5.0;
-    }
-
-    let total_frames = (max_duration * fps as f64).ceil() as usize;
-
-    if let Some(path) = audio_track_path {
-        if let Ok(bytes) = std::fs::read(path) {
-            if let Ok(samples) = load_audio_bytes(&bytes, director.audio_mixer.sample_rate) {
-                director.add_global_audio(samples);
-            }
-        }
-    }
-
-    let destination: Locator = out_path.clone().into();
-    let settings = EncoderSettings::preset_h264_yuv420p(width as usize, height as usize, false);
-
-    let mut encoder = Encoder::new(&destination, settings)?;
-
-    let info = skia_safe::ImageInfo::new(
-        (width, height),
-        ColorType::RGBA8888,
-        AlphaType::Premul,
-        Some(ColorSpace::new_srgb()),
-    );
-
-    #[allow(unused_mut)]
-    let mut surface = None;
-
-    #[cfg(feature = "vulkan")]
-    if let Some(ctx) = gpu_context {
-        surface = skia_safe::gpu::surfaces::render_target(
-            ctx,
-            Budgeted::Yes,
-            &info,
-            0,
-            SurfaceOrigin::TopLeft,
-            None,
-            false,
-            None,
-        );
-    }
-
-    let mut surface = surface
-        .or_else(|| skia_safe::surfaces::raster(&info, None, None))
-        .ok_or(RenderError::SurfaceFailure)?;
-
-    let mut accumulation_surface = if director.samples_per_frame > 1 {
-        Some(
-            surface
-                .new_surface(&info)
-                .ok_or(RenderError::SurfaceFailure)?,
-        )
-    } else {
-        None
-    };
-
-    let mut layout_engine = LayoutEngine::new();
-
-    let samples = director.samples_per_frame.max(1);
-    let shutter_angle = director.shutter_angle.clamp(0.0, 360.0);
-    let frame_duration = 1.0 / fps as f64;
-    let shutter_duration = frame_duration * (shutter_angle as f64 / 360.0);
-
-    let samples_per_frame = (director.audio_mixer.sample_rate as f64 / fps as f64).round() as usize;
-
-    // Pre-allocate transition surfaces to avoid per-frame allocation churn
-    let mut transition_surfaces = if !director.transitions.is_empty() {
-        let surf_a =
-            skia_safe::surfaces::raster(&info, None, None).ok_or(RenderError::SurfaceFailure)?;
-        let surf_b =
-            skia_safe::surfaces::raster(&info, None, None).ok_or(RenderError::SurfaceFailure)?;
-        Some((surf_a, surf_b))
-    } else {
-        None
-    };
-
-    // Destructure director only where needed or create refs
-
-    for i in 0..total_frames {
-        let frame_start_time = i as f64 / fps as f64;
-        let shutter_start_time = frame_start_time - (shutter_duration / 2.0);
-
-        let render_at_time = |director: &mut Director,
-                              layout_engine: &mut LayoutEngine,
-                              time: f64,
-                              canvas: &skia_safe::Canvas,
-                              surfaces: &mut Option<(skia_safe::Surface, skia_safe::Surface)>|
-         -> Result<(), RenderError> {
-            director.update(time);
-            layout_engine.compute_layout(
-                &mut director.scene,
-                director.width,
-                director.height,
-                time,
-            );
-            director.run_post_layout(time);
-
-            let assets_ref = &director.assets;
-
-            canvas.clear(skia_safe::Color::BLACK);
-
-            // Check transition
-            let transition = director
-                .transitions
-                .iter()
-                .find(|t| time >= t.start_time && time < t.start_time + t.duration)
-                .cloned();
-
-            // Collect items. Need indices to match with transition.
-            let mut items: Vec<(usize, TimelineItem)> = director
-                .timeline
-                .iter()
-                .cloned()
-                .enumerate()
-                .filter(|(_, item)| {
-                    time >= item.start_time && time < item.start_time + item.duration
-                })
-                .collect();
-            items.sort_by_key(|(_, item)| item.z_index);
-
-            if let Some(trans) = transition {
-                let mut drawn_transition = false;
-
-                for (idx, item) in items {
-                    if idx == trans.from_scene_idx || idx == trans.to_scene_idx {
-                        if !drawn_transition {
-                            if let Some((surf_a, surf_b)) = surfaces {
-                                // Render A & B
-                                if let (Some(item_a), Some(item_b)) = (
-                                    director.timeline.get(trans.from_scene_idx),
-                                    director.timeline.get(trans.to_scene_idx),
-                                ) {
-                                    surf_a.canvas().clear(skia_safe::Color::TRANSPARENT);
-                                    surf_b.canvas().clear(skia_safe::Color::TRANSPARENT);
-
-                                    render_recursive(
-                                        &director.scene,
-                                        assets_ref,
-                                        item_a.scene_root,
-                                        surf_a.canvas(),
-                                        1.0,
-                                        0,
-                                    )?;
-                                    render_recursive(
-                                        &director.scene,
-                                        assets_ref,
-                                        item_b.scene_root,
-                                        surf_b.canvas(),
-                                        1.0,
-                                        0,
-                                    )?;
-
-                                    let img_a = surf_a.image_snapshot();
-                                    let img_b = surf_b.image_snapshot();
-
-                                    let progress = ((time - trans.start_time) / trans.duration)
-                                        .clamp(0.0, 1.0)
-                                        as f32;
-                                    let val = trans.easing.eval(progress);
-
-                                    draw_transition(
-                                        canvas,
-                                        &img_a,
-                                        &img_b,
-                                        val,
-                                        &trans.kind,
-                                        director.width,
-                                        director.height,
-                                    );
-                                }
-                            }
-                            drawn_transition = true;
-                        }
-                    } else {
-                        render_recursive(
-                            &director.scene,
-                            assets_ref,
-                            item.scene_root,
-                            canvas,
-                            1.0,
-                            0,
-                        )?;
-                    }
-                }
-            } else {
-                for (_, item) in items {
-                    render_recursive(&director.scene, assets_ref, item.scene_root, canvas, 1.0, 0)?;
-                }
-            }
-            if time < 0.1 {
-                debug!("[Frame] render complete");
-            }
-            Ok(())
-        };
-
-        if samples == 1 {
-            render_at_time(
-                director,
-                &mut layout_engine,
-                frame_start_time,
-                surface.canvas(),
-                &mut transition_surfaces,
-            )?;
-        } else {
-            let scratch_surface = accumulation_surface.as_mut().unwrap();
-
-            for s in 0..samples {
-                let t_offset = if samples > 1 {
-                    (s as f64 / (samples - 1) as f64) * shutter_duration
-                } else {
-                    0.0
-                };
-                let sample_time = shutter_start_time + t_offset;
-
-                // Clear handled by render_at_time
-                render_at_time(
-                    director,
-                    &mut layout_engine,
-                    sample_time,
-                    scratch_surface.canvas(),
-                    &mut transition_surfaces,
-                )?;
-
-                let weight = 1.0 / (s as f32 + 1.0);
-                let mut paint = skia_safe::Paint::default();
-                paint.set_alpha_f(weight);
-                let image = scratch_surface.image_snapshot();
-
-                if s == 0 {
-                    surface.canvas().clear(skia_safe::Color::BLACK);
-                }
-                surface.canvas().draw_image(&image, (0, 0), Some(&paint));
-            }
-        }
-
-        if let Some(pixmap) = surface.peek_pixels() {
-            if let Some(bytes) = pixmap.bytes() {
-                let frame_shape = (height as usize, width as usize, 4);
-                // Safety: check size
-                if bytes.len() == width as usize * height as usize * 4 {
-                    let vec_bytes = bytes.to_vec();
-                    let frame = Array3::from_shape_vec(frame_shape, vec_bytes)?;
-                    encoder.encode(&frame, Time::from_secs_f64(i as f64 / fps as f64))?;
-                }
-            }
-        } else {
-            let mut bytes = Vec::with_capacity((width * height * 4) as usize);
-            bytes.resize((width * height * 4) as usize, 0);
-            let info = skia_safe::ImageInfo::new(
-                (width, height),
-                ColorType::RGBA8888,
-                AlphaType::Premul,
-                None,
-            );
-            if surface.read_pixels(&info, &mut bytes, (width * 4) as usize, (0, 0)) {
-                let frame_shape = (height as usize, width as usize, 4);
-                let frame = Array3::from_shape_vec(frame_shape, bytes)?;
-                encoder.encode(&frame, Time::from_secs_f64(i as f64 / fps as f64))?;
-            }
-        }
-
-        let audio_samples = director.mix_audio(samples_per_frame, frame_start_time);
-        encoder.encode_audio(&audio_samples, Time::from_secs_f64(frame_start_time))?;
-    }
-
-    encoder.finish()?;
-
-    Ok(())
-}
 
 /// Recursively renders a node and its children to the canvas.
 ///
@@ -430,8 +121,6 @@ pub fn render_recursive(
             paint.set_blend_mode(node.blend_mode);
 
             // Create an isolated layer.
-            // If we have a mask, we need to ensure the content is drawn, then the mask is drawn with DstIn.
-            // This layer acts as the composition group.
             canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&paint));
 
             let r = node
@@ -443,7 +132,6 @@ pub fn render_recursive(
                     let mut mask_paint = skia_safe::Paint::default();
                     mask_paint.set_blend_mode(skia_safe::BlendMode::DstIn);
 
-                    // Create a layer for the mask, which will composite onto the content with DstIn
                     canvas
                         .save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&mask_paint));
                     if let Err(e) = render_recursive(scene, assets, mask_id, canvas, 1.0, depth + 1)
@@ -467,155 +155,6 @@ pub fn render_recursive(
         last_error?;
     }
     Ok(())
-}
-
-fn get_transition_shader(kind: &TransitionType) -> &'static str {
-    match kind {
-        TransitionType::Fade => {
-            r#"
-            uniform shader imageA;
-            uniform shader imageB;
-            uniform float progress;
-            half4 main(float2 p) {
-                half4 colorA = imageA.eval(p);
-                half4 colorB = imageB.eval(p);
-                return mix(colorA, colorB, progress);
-            }
-        "#
-        }
-        TransitionType::SlideLeft => {
-            r#"
-            uniform shader imageA;
-            uniform shader imageB;
-            uniform float progress;
-            uniform float2 resolution;
-            half4 main(float2 p) {
-                float x_offset = resolution.x * progress;
-                if (p.x < (resolution.x - x_offset)) {
-                    return imageA.eval(float2(p.x + x_offset, p.y));
-                } else {
-                    return imageB.eval(float2(p.x - (resolution.x - x_offset), p.y));
-                }
-            }
-        "#
-        }
-        TransitionType::SlideRight => {
-            r#"
-            uniform shader imageA;
-            uniform shader imageB;
-            uniform float progress;
-            uniform float2 resolution;
-            half4 main(float2 p) {
-                float x_offset = resolution.x * progress;
-                if (p.x > x_offset) {
-                    return imageA.eval(float2(p.x - x_offset, p.y));
-                } else {
-                    return imageB.eval(float2(p.x - x_offset + resolution.x, p.y));
-                }
-            }
-        "#
-        }
-        TransitionType::WipeLeft => {
-            r#"
-            uniform shader imageA;
-            uniform shader imageB;
-            uniform float progress;
-            uniform float2 resolution;
-            half4 main(float2 p) {
-                 float boundary = resolution.x * (1.0 - progress);
-                 if (p.x < boundary) {
-                     return imageA.eval(p);
-                 } else {
-                     return imageB.eval(p);
-                 }
-            }
-        "#
-        }
-        TransitionType::WipeRight => {
-            r#"
-            uniform shader imageA;
-            uniform shader imageB;
-            uniform float progress;
-            uniform float2 resolution;
-            half4 main(float2 p) {
-                 float boundary = resolution.x * progress;
-                 if (p.x > boundary) {
-                     return imageA.eval(p);
-                 } else {
-                     return imageB.eval(p);
-                 }
-            }
-        "#
-        }
-        TransitionType::CircleOpen => {
-            r#"
-            uniform shader imageA;
-            uniform shader imageB;
-            uniform float progress;
-            uniform float2 resolution;
-            half4 main(float2 p) {
-                float2 center = resolution / 2.0;
-                float max_radius = length(resolution);
-                float current_radius = max_radius * progress;
-                float dist = distance(p, center);
-                if (dist < current_radius) {
-                    return imageB.eval(p);
-                } else {
-                    return imageA.eval(p);
-                }
-            }
-        "#
-        }
-    }
-}
-
-fn draw_transition(
-    canvas: &skia_safe::Canvas,
-    img_a: &skia_safe::Image,
-    img_b: &skia_safe::Image,
-    progress: f32,
-    kind: &TransitionType,
-    width: i32,
-    height: i32,
-) {
-    let sksl = get_transition_shader(kind);
-    let result = RuntimeEffect::make_for_shader(sksl, None);
-    if let Ok(effect) = result {
-        let mut uniform_bytes = Vec::new();
-        uniform_bytes.extend_from_slice(&progress.to_le_bytes());
-
-        match kind {
-            TransitionType::Fade => {}
-            _ => {
-                uniform_bytes.extend_from_slice(&(width as f32).to_le_bytes());
-                uniform_bytes.extend_from_slice(&(height as f32).to_le_bytes());
-            }
-        }
-
-        let uniforms_data = Data::new_copy(&uniform_bytes);
-
-        let shader_a = img_a
-            .to_shader(None, skia_safe::SamplingOptions::default(), None)
-            .unwrap();
-        let shader_b = img_b
-            .to_shader(None, skia_safe::SamplingOptions::default(), None)
-            .unwrap();
-
-        let children = [ChildPtr::Shader(shader_a), ChildPtr::Shader(shader_b)];
-
-        if let Some(shader) = effect.make_shader(uniforms_data, &children, None) {
-            let mut paint = skia_safe::Paint::default();
-            paint.set_shader(Some(shader));
-            canvas.draw_rect(
-                skia_safe::Rect::from_wh(width as f32, height as f32),
-                &paint,
-            );
-        } else {
-            error!("Failed to make shader");
-        }
-    } else {
-        error!("Shader compilation error: {:?}", result.err());
-    }
 }
 
 /// Renders a single frame at a specific timestamp to the provided canvas.
@@ -646,6 +185,107 @@ pub fn render_frame(
 
     for (_, item) in items {
         render_recursive(&director.scene, assets, item.scene_root, canvas, 1.0, 0)?;
+    }
+    Ok(())
+}
+
+/// Renders a frame at the given time, handling transitions between scenes.
+///
+/// Used internally by the export pipeline.
+pub(crate) fn render_at_time(
+    director: &mut Director,
+    layout_engine: &mut LayoutEngine,
+    time: f64,
+    canvas: &skia_safe::Canvas,
+    surfaces: &mut Option<(skia_safe::Surface, skia_safe::Surface)>,
+) -> Result<(), RenderError> {
+    director.update(time);
+    layout_engine.compute_layout(&mut director.scene, director.width, director.height, time);
+    director.run_post_layout(time);
+
+    let assets_ref = &director.assets;
+
+    canvas.clear(skia_safe::Color::BLACK);
+
+    // Check transition
+    let transition = director
+        .transitions
+        .iter()
+        .find(|t| time >= t.start_time && time < t.start_time + t.duration)
+        .cloned();
+
+    // Collect items. Need indices to match with transition.
+    let mut items: Vec<(usize, TimelineItem)> = director
+        .timeline
+        .iter()
+        .cloned()
+        .enumerate()
+        .filter(|(_, item)| time >= item.start_time && time < item.start_time + item.duration)
+        .collect();
+    items.sort_by_key(|(_, item)| item.z_index);
+
+    if let Some(trans) = transition {
+        let mut drawn_transition = false;
+
+        for (idx, item) in items {
+            if idx == trans.from_scene_idx || idx == trans.to_scene_idx {
+                if !drawn_transition {
+                    if let Some((surf_a, surf_b)) = surfaces {
+                        if let (Some(item_a), Some(item_b)) = (
+                            director.timeline.get(trans.from_scene_idx),
+                            director.timeline.get(trans.to_scene_idx),
+                        ) {
+                            surf_a.canvas().clear(skia_safe::Color::TRANSPARENT);
+                            surf_b.canvas().clear(skia_safe::Color::TRANSPARENT);
+
+                            render_recursive(
+                                &director.scene,
+                                assets_ref,
+                                item_a.scene_root,
+                                surf_a.canvas(),
+                                1.0,
+                                0,
+                            )?;
+                            render_recursive(
+                                &director.scene,
+                                assets_ref,
+                                item_b.scene_root,
+                                surf_b.canvas(),
+                                1.0,
+                                0,
+                            )?;
+
+                            let img_a = surf_a.image_snapshot();
+                            let img_b = surf_b.image_snapshot();
+
+                            let progress =
+                                ((time - trans.start_time) / trans.duration).clamp(0.0, 1.0) as f32;
+                            let val = trans.easing.eval(progress);
+
+                            draw_transition(
+                                canvas,
+                                &img_a,
+                                &img_b,
+                                val,
+                                &trans.kind,
+                                director.width,
+                                director.height,
+                            );
+                        }
+                    }
+                    drawn_transition = true;
+                }
+            } else {
+                render_recursive(&director.scene, assets_ref, item.scene_root, canvas, 1.0, 0)?;
+            }
+        }
+    } else {
+        for (_, item) in items {
+            render_recursive(&director.scene, assets_ref, item.scene_root, canvas, 1.0, 0)?;
+        }
+    }
+    if time < 0.1 {
+        debug!("[Frame] render complete");
     }
     Ok(())
 }

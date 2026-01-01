@@ -13,10 +13,10 @@
 //! - `DirectorContext`: Shared state for nested compositions.
 
 // use rayon::prelude::*; // Rayon disabled due to Taffy !Send
-use crate::animation::EasingType;
 use crate::audio::{AudioAnalyzer, AudioMixer, AudioTrack};
 use crate::scene::SceneGraph;
 use crate::systems::assets::AssetManager;
+use crate::systems::transitions::Transition;
 use crate::types::NodeId;
 use crate::video_wrapper::RenderMode;
 use crate::AssetLoader;
@@ -46,28 +46,6 @@ pub struct TimelineItem {
     pub z_index: i32,
     /// Associated audio tracks.
     pub audio_tracks: Vec<usize>,
-}
-
-/// The type of visual transition between scenes.
-#[derive(Clone, Debug)]
-pub enum TransitionType {
-    Fade,
-    SlideLeft,
-    SlideRight,
-    WipeLeft,
-    WipeRight,
-    CircleOpen,
-}
-
-/// A definition of a transition between two scenes.
-#[derive(Clone)]
-pub struct Transition {
-    pub from_scene_idx: usize,
-    pub to_scene_idx: usize,
-    pub start_time: f64,
-    pub duration: f64,
-    pub kind: TransitionType,
-    pub easing: EasingType,
 }
 
 /// The central engine coordinator.
@@ -172,50 +150,22 @@ impl Director {
     pub fn mix_audio(&mut self, samples_needed: usize, time: f64) -> Vec<f32> {
         let mut output = self.audio_mixer.mix(samples_needed, time);
 
-        // Traverse active scenes
-        let mut active_roots = Vec::new();
-        for item in &self.timeline {
-            if time >= item.start_time && time < item.start_time + item.duration {
-                let local_time = time - item.start_time;
-                active_roots.push((item.scene_root, local_time));
-            }
-        }
+        // Collect active scene roots
+        let active_roots: Vec<(crate::types::NodeId, f64)> = self
+            .timeline
+            .iter()
+            .filter(|item| time >= item.start_time && time < item.start_time + item.duration)
+            .map(|item| (item.scene_root, time - item.start_time))
+            .collect();
 
-        let mut stack = Vec::new();
-        for (root, t) in active_roots {
-            stack.push((root, t));
-        }
-
-        while let Some((id, local_time)) = stack.pop() {
-            // We access nodes directly to avoid self borrow issues with get_node if we were using &mut self methods
-            // But here we need to read nodes.
-            if id < self.scene.nodes.len() {
-                if let Some(node) = &self.scene.nodes[id] {
-                    // Check audio
-                    if let Some(samples) = node.element.get_audio(
-                        local_time,
-                        samples_needed,
-                        self.audio_mixer.sample_rate,
-                    ) {
-                        for (i, val) in samples.iter().enumerate() {
-                            if i < output.len() {
-                                output[i] += val;
-                            }
-                        }
-                    }
-
-                    // Children
-                    for child_id in &node.children {
-                        stack.push((*child_id, local_time));
-                    }
-                }
-            }
-        }
-
-        // Clamp
-        for s in output.iter_mut() {
-            *s = s.clamp(-1.0, 1.0);
-        }
+        // Delegate scene graph audio mixing to audio module
+        crate::audio::mix_scene_audio(
+            &mut output,
+            &self.scene.nodes,
+            &active_roots,
+            samples_needed,
+            self.audio_mixer.sample_rate,
+        );
 
         output
     }

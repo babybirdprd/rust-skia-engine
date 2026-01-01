@@ -26,7 +26,9 @@ Use this map to locate the correct file for a specific task.
 | **Element Trait** | `element.rs` | `Element` trait (all nodes implement) |
 | **Shared Types** | `types.rs` | `Color`, `Transform`, `NodeId` |
 | **Design System** | `tokens.rs` | `DesignSystem`, spacing, safe areas |
-| **Rendering** | `systems/renderer.rs` | `render_recursive`, `render_export` |
+| **Rendering** | `systems/renderer.rs` | `render_recursive`, `render_frame` |
+| **Transitions** | `systems/transitions.rs` | `TransitionType`, `Transition`, shaders |
+| **Video Export** | `export/video.rs` | `render_export`, FFmpeg encoding |
 | **Layout** | `systems/layout.rs` | `LayoutEngine`, Taffy integration |
 | **Assets** | `systems/assets.rs` | `AssetManager`, fonts, shaders |
 | **Scripting** | `scripting/mod.rs` | Rhai engine, `register_rhai_api` |
@@ -34,7 +36,7 @@ Use this map to locate the correct file for a specific task.
 | **Scripting Utils** | `scripting/utils.rs` | Parsers (`parse_easing`, `parse_layout_style`) |
 | **Scripting API** | `scripting/api/*.rs` | Lifecycle, nodes, animation, audio, effects, properties |
 | **Animation** | `animation.rs` | `Animated`, `EasingType`, springs |
-| **Audio** | `audio.rs` | `AudioMixer`, `AudioTrack` |
+| **Audio** | `audio.rs` | `AudioMixer`, `AudioTrack`, `AudioAnalyzer` |
 | **Video Encoding** | `video_wrapper.rs` | FFMPEG/video-rs wrapper |
 
 ### Node Types (`crates/director-core/src/node`)
@@ -82,6 +84,9 @@ crates/
 │   ├── src/
 │   │   ├── director.rs      # Timeline coordinator
 │   │   ├── scene.rs         # Scene graph (arena storage)
+│   │   ├── export/          # Video export pipeline
+│   │   │   ├── mod.rs
+│   │   │   └── video.rs     # render_export, FFmpeg encoding
 │   │   ├── scripting/       # Rhai API bindings (modular)
 │   │   │   ├── mod.rs       # Entry point, register_rhai_api()
 │   │   │   ├── types.rs     # Movie/Scene/Node/AudioTrack handles
@@ -96,7 +101,7 @@ crates/
 │   │   │       └── properties.rs # set_style, set_mask, set_pivot
 │   │   ├── animation.rs     # Keyframe/spring animation
 │   │   ├── node/            # Node implementations
-│   │   └── systems/         # Renderer, Layout, Assets
+│   │   └── systems/         # Renderer, Layout, Assets, Transitions
 │   └── tests/               # Integration tests
 ├── director-cli/        # CLI binary
 ├── director-schema/     # Schema types

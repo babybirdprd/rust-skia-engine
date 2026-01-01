@@ -252,7 +252,7 @@ movie
 #[test]
 #[ignore = "Slow: Generates video file. Run with --ignored flag."]
 fn api_showcase_video_export() {
-    use director_core::systems::renderer::render_export;
+    use director_core::export::render_export;
     use std::fs;
     use std::path::PathBuf;
 

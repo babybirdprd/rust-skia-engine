@@ -166,7 +166,7 @@ fn main() -> anyhow::Result<()> {
     let movie = engine.eval::<scripting::MovieHandle>(script)?;
     let mut director = movie.director.lock().unwrap();
     
-    director_engine::systems::renderer::render_export(
+    director_engine::export::render_export(
         &mut director,
         "output.mp4".into(),
         None,
