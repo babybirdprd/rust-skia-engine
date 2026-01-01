@@ -10,7 +10,9 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use taffy::prelude::*;
 use taffy::style::Dimension;
+use taffy::style::{GridPlacement, GridTemplateComponent};
 
 /// Dump scene tree to string for snapshot testing.
 fn dump_scene_tree(director: &Director) -> String {
@@ -163,4 +165,88 @@ fn layout_structure_snapshot() {
         actual,
         expected
     );
+}
+
+#[test]
+fn grid_layout_basic() {
+    let director = Director::new(
+        1000,
+        1000,
+        30,
+        Arc::new(DefaultAssetLoader),
+        RenderMode::Preview,
+        None,
+    );
+    let mut d = director;
+
+    // Grid Container
+    let mut grid = BoxNode::new();
+    grid.style.size = taffy::geometry::Size {
+        width: Dimension::length(1000.0),
+        height: Dimension::length(1000.0),
+    };
+    grid.style.display = taffy::style::Display::Grid;
+    grid.style.align_items = Some(AlignItems::Stretch);
+    grid.style.justify_content = Some(JustifyContent::Stretch);
+    grid.style.grid_template_columns = vec![
+        GridTemplateComponent::Single(fr(1.0)),
+        GridTemplateComponent::Single(fr(1.0)),
+    ];
+    grid.style.grid_template_rows = vec![
+        GridTemplateComponent::Single(fr(1.0)),
+        GridTemplateComponent::Single(fr(1.0)),
+    ];
+    let grid_id = d.scene.add_node(Box::new(grid));
+
+    d.timeline.push(TimelineItem {
+        scene_root: grid_id,
+        start_time: 0.0,
+        duration: 10.0,
+        z_index: 0,
+        audio_tracks: vec![],
+    });
+
+    // Item 1 (0,0)
+    let mut item1 = BoxNode::new();
+    item1.style.grid_column = taffy::geometry::Line {
+        start: GridPlacement::Line(1.into()),
+        end: GridPlacement::Auto,
+    };
+    item1.style.grid_row = taffy::geometry::Line {
+        start: GridPlacement::Line(1.into()),
+        end: GridPlacement::Auto,
+    };
+    let id1 = d.scene.add_node(Box::new(item1));
+    d.scene.add_child(grid_id, id1);
+
+    // Item 2 (1,1)
+    let mut item2 = BoxNode::new();
+    item2.style.grid_column = taffy::geometry::Line {
+        start: GridPlacement::Line(2.into()),
+        end: GridPlacement::Auto,
+    };
+    item2.style.grid_row = taffy::geometry::Line {
+        start: GridPlacement::Line(2.into()),
+        end: GridPlacement::Auto,
+    };
+    let id2 = d.scene.add_node(Box::new(item2));
+    d.scene.add_child(grid_id, id2);
+
+    let mut layout_engine = director_core::systems::layout::LayoutEngine::new();
+    d.update(0.0);
+    layout_engine.compute_layout(&mut d.scene, 1000, 1000, 0.0);
+
+    // Verify positions
+    let n1 = d.scene.get_node(id1).unwrap();
+    let n2 = d.scene.get_node(id2).unwrap();
+
+    assert_eq!(n1.layout_rect.left, 0.0);
+    assert_eq!(n1.layout_rect.top, 0.0);
+    assert_eq!(n1.layout_rect.width(), 500.0);
+    assert_eq!(n1.layout_rect.height(), 500.0);
+
+    assert_eq!(n2.layout_rect.left, 500.0);
+    assert_eq!(n2.layout_rect.top, 500.0);
+    assert_eq!(n2.layout_rect.width(), 500.0);
+    assert_eq!(n2.layout_rect.height(), 500.0);
 }

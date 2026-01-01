@@ -26,11 +26,8 @@ use rhai::{Engine, Map, Module};
 use skia_safe::Path;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use taffy::geometry::Rect;
-use taffy::style::{
-    AlignItems, Dimension, FlexDirection, JustifyContent, LengthPercentage, LengthPercentageAuto,
-    Style,
-};
+use taffy::prelude::*;
+use taffy::style::{GridAutoFlow, GridPlacement, GridTemplateComponent, Style};
 use tracing::error;
 
 /// Wrapper around `Director` for Rhai scripting.
@@ -418,6 +415,115 @@ fn parse_layout_style(props: &rhai::Map, style: &mut Style) {
             top: m,
             bottom: m,
         };
+    }
+
+    // Gap
+    if let Some(g) = props.get("gap").and_then(|v| v.as_float().ok()) {
+        let gap_val = LengthPercentage::length(g as f32);
+        style.gap = Size {
+            width: gap_val,
+            height: gap_val,
+        };
+    }
+
+    // Display (Flex/Grid)
+    if let Some(s) = props
+        .get("display")
+        .and_then(|v| v.clone().into_string().ok())
+    {
+        style.display = match s.as_str() {
+            "grid" => Display::Grid,
+            "none" => Display::None,
+            _ => Display::Flex,
+        };
+    }
+
+    // Grid Templates
+    let parse_track_sizing = |s: &str| -> GridTemplateComponent<String> {
+        if s == "auto" {
+            GridTemplateComponent::Single(auto())
+        } else if s == "min-content" || s == "min_content" {
+            GridTemplateComponent::Single(min_content())
+        } else if s == "max-content" || s == "max_content" {
+            GridTemplateComponent::Single(max_content())
+        } else if s.ends_with("fr") {
+            let val = s.trim_end_matches("fr").parse::<f32>().unwrap_or(1.0);
+            GridTemplateComponent::Single(fr(val))
+        } else if s.ends_with("%") {
+            let val = s.trim_end_matches("%").parse::<f32>().unwrap_or(0.0);
+            GridTemplateComponent::Single(percent(val / 100.0))
+        } else {
+            let val = s.parse::<f32>().unwrap_or(0.0);
+            GridTemplateComponent::Single(length(val))
+        }
+    };
+
+    if let Some(cols) = props
+        .get("grid_template_columns")
+        .and_then(|v| v.clone().into_array().ok())
+    {
+        style.grid_template_columns = cols
+            .into_iter()
+            .map(|v| parse_track_sizing(&v.to_string()))
+            .collect();
+    }
+    if let Some(rows) = props
+        .get("grid_template_rows")
+        .and_then(|v| v.clone().into_array().ok())
+    {
+        style.grid_template_rows = rows
+            .into_iter()
+            .map(|v| parse_track_sizing(&v.to_string()))
+            .collect();
+    }
+
+    // Grid Placement (Item)
+    let parse_gp = |s: &str| -> GridPlacement<String> {
+        let s = s.trim();
+        if s.starts_with("span") {
+            let val = s
+                .trim_start_matches("span")
+                .trim()
+                .parse::<u16>()
+                .unwrap_or(1);
+            GridPlacement::Span(val)
+        } else if let Ok(val) = s.parse::<i16>() {
+            GridPlacement::Line(val.into())
+        } else {
+            GridPlacement::Auto
+        }
+    };
+
+    let parse_line = |s: &str| -> Line<GridPlacement<String>> {
+        if s.contains('/') {
+            let parts: Vec<&str> = s.split('/').collect();
+            Line {
+                start: parse_gp(parts[0]),
+                end: if parts.len() > 1 {
+                    parse_gp(parts[1])
+                } else {
+                    GridPlacement::Auto
+                },
+            }
+        } else {
+            Line {
+                start: parse_gp(s),
+                end: GridPlacement::Auto,
+            }
+        }
+    };
+
+    if let Some(s) = props
+        .get("grid_row")
+        .and_then(|v| v.clone().into_string().ok())
+    {
+        style.grid_row = parse_line(&s);
+    }
+    if let Some(s) = props
+        .get("grid_column")
+        .and_then(|v| v.clone().into_string().ok())
+    {
+        style.grid_column = parse_line(&s);
     }
 
     // Position (Relative/Absolute)

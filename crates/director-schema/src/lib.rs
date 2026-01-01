@@ -135,10 +135,30 @@ pub struct StyleMap {
     pub width: Option<String>, // "100%", "50px", "auto"
     pub height: Option<String>,
 
+    // Display mode
+    /// Layout display mode: "flex" (default) or "grid"
+    pub display: Option<String>,
+
     // Flexbox
     pub flex_direction: Option<String>, // "row", "column"
     pub justify_content: Option<String>,
     pub align_items: Option<String>,
+
+    // Grid template (container)
+    /// Grid column definitions: ["1fr", "2fr", "100px", "auto"]
+    pub grid_template_columns: Option<Vec<String>>,
+    /// Grid row definitions: ["auto", "1fr", "200px"]
+    pub grid_template_rows: Option<Vec<String>>,
+
+    // Grid placement (item)
+    /// Grid row placement: "1", "1 / 3", "span 2"
+    pub grid_row: Option<String>,
+    /// Grid column placement: "1", "1 / 3", "span 2"
+    pub grid_column: Option<String>,
+
+    // Gap (works for both flex and grid)
+    /// Gap between items in pixels
+    pub gap: Option<f32>,
 
     // Appearance
     pub bg_color: Option<Color>,

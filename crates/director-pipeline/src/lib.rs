@@ -11,7 +11,12 @@ use director_schema::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
-use taffy::style::{AlignItems, Dimension, FlexDirection, JustifyContent, Position, Style};
+use taffy::geometry::{Line, Rect, Size};
+use taffy::prelude::*;
+use taffy::style::{
+    AlignItems, Dimension, Display, FlexDirection, GridPlacement, GridTemplateComponent,
+    JustifyContent, LengthPercentage, LengthPercentageAuto, Position, Style,
+};
 
 /// Converts a Schema Request into a runnable Director instance.
 pub fn load_movie(request: MovieRequest, loader: Arc<dyn AssetLoader>) -> Director {
@@ -219,6 +224,24 @@ fn apply_style_map(style: &mut Style, map: &StyleMap) {
         style.size.height = parse_dim(h);
     }
 
+    // Display mode
+    if let Some(d) = &map.display {
+        style.display = match d.as_str() {
+            "grid" => Display::Grid,
+            "none" => Display::None,
+            _ => Display::Flex,
+        };
+    }
+
+    // Gap
+    if let Some(g) = map.gap {
+        let gap_val = LengthPercentage::length(g);
+        style.gap = Size {
+            width: gap_val,
+            height: gap_val,
+        };
+    }
+
     // Flexbox
     if let Some(d) = &map.flex_direction {
         style.flex_direction = match d.as_str() {
@@ -245,10 +268,26 @@ fn apply_style_map(style: &mut Style, map: &StyleMap) {
         };
     }
 
+    // Grid templates
+    if let Some(cols) = &map.grid_template_columns {
+        style.grid_template_columns = cols.iter().map(|s| parse_track_sizing_str(s)).collect();
+    }
+    if let Some(rows) = &map.grid_template_rows {
+        style.grid_template_rows = rows.iter().map(|s| parse_track_sizing_str(s)).collect();
+    }
+
+    // Grid placement
+    if let Some(s) = &map.grid_row {
+        style.grid_row = parse_grid_line_str(s);
+    }
+    if let Some(s) = &map.grid_column {
+        style.grid_column = parse_grid_line_str(s);
+    }
+
     // Padding
     if let Some(p) = map.padding {
-        let d = taffy::style::LengthPercentage::length(p);
-        style.padding = taffy::geometry::Rect {
+        let d = LengthPercentage::length(p);
+        style.padding = Rect {
             left: d,
             right: d,
             top: d,
@@ -258,8 +297,8 @@ fn apply_style_map(style: &mut Style, map: &StyleMap) {
 
     // Margin
     if let Some(m) = map.margin {
-        let d = taffy::style::LengthPercentageAuto::length(m);
-        style.margin = taffy::geometry::Rect {
+        let d = LengthPercentageAuto::length(m);
+        style.margin = Rect {
             left: d,
             right: d,
             top: d,
@@ -276,16 +315,16 @@ fn apply_style_map(style: &mut Style, map: &StyleMap) {
 
     // Insets for absolute positioning
     if let Some(top) = map.top {
-        style.inset.top = taffy::style::LengthPercentageAuto::length(top);
+        style.inset.top = LengthPercentageAuto::length(top);
     }
     if let Some(left) = map.left {
-        style.inset.left = taffy::style::LengthPercentageAuto::length(left);
+        style.inset.left = LengthPercentageAuto::length(left);
     }
     if let Some(right) = map.right {
-        style.inset.right = taffy::style::LengthPercentageAuto::length(right);
+        style.inset.right = LengthPercentageAuto::length(right);
     }
     if let Some(bottom) = map.bottom {
-        style.inset.bottom = taffy::style::LengthPercentageAuto::length(bottom);
+        style.inset.bottom = LengthPercentageAuto::length(bottom);
     }
 }
 
@@ -346,5 +385,59 @@ fn easing_to_str(easing: &EasingType) -> &'static str {
         EasingType::BackOut => "back_out",
         EasingType::BackIn => "back_in",
         EasingType::BackInOut => "back_in_out",
+    }
+}
+
+fn parse_track_sizing_str(s: &str) -> GridTemplateComponent<String> {
+    if s == "auto" {
+        GridTemplateComponent::Single(auto())
+    } else if s == "min-content" || s == "min_content" {
+        GridTemplateComponent::Single(min_content())
+    } else if s == "max-content" || s == "max_content" {
+        GridTemplateComponent::Single(max_content())
+    } else if s.ends_with("fr") {
+        let val = s.trim_end_matches("fr").parse::<f32>().unwrap_or(1.0);
+        GridTemplateComponent::Single(fr(val))
+    } else if s.ends_with("%") {
+        let val = s.trim_end_matches("%").parse::<f32>().unwrap_or(0.0);
+        GridTemplateComponent::Single(percent(val / 100.0))
+    } else {
+        let val = s.parse::<f32>().unwrap_or(0.0);
+        GridTemplateComponent::Single(length(val))
+    }
+}
+
+fn parse_grid_placement_str(s: &str) -> GridPlacement<String> {
+    let s = s.trim();
+    if s.starts_with("span") {
+        let val = s
+            .trim_start_matches("span")
+            .trim()
+            .parse::<u16>()
+            .unwrap_or(1);
+        GridPlacement::Span(val)
+    } else if let Ok(val) = s.parse::<i16>() {
+        GridPlacement::Line(val.into())
+    } else {
+        GridPlacement::Auto
+    }
+}
+
+fn parse_grid_line_str(s: &str) -> Line<GridPlacement<String>> {
+    if s.contains('/') {
+        let parts: Vec<&str> = s.split('/').collect();
+        Line {
+            start: parse_grid_placement_str(parts[0]),
+            end: if parts.len() > 1 {
+                parse_grid_placement_str(parts[1])
+            } else {
+                GridPlacement::Auto
+            },
+        }
+    } else {
+        Line {
+            start: parse_grid_placement_str(s),
+            end: GridPlacement::Auto,
+        }
     }
 }
