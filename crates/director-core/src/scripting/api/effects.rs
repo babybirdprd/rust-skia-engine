@@ -6,6 +6,9 @@
 //! - **Color Effects**: `apply_effect` for grayscale, sepia, invert, contrast, brightness
 //! - **Blur Effect**: `apply_effect("blur", value)` for Gaussian blur
 //! - **Custom Shaders**: `apply_effect("shader", {...})` for SkSL shaders
+//! - **Cinematic Shaders**:
+//!   - `apply_effect("directional_blur", #{ strength: 10.0, angle: 45.0, samples: 16 })` for motion blur
+//!   - `apply_effect("grain", #{ intensity: 0.1, size: 2.0 })` for film grain
 
 use crate::animation::{Animated, TweenableVector};
 use crate::node::{EffectType, ShaderUniform};
@@ -90,58 +93,104 @@ pub fn register(engine: &mut Engine) {
         },
     );
 
-    // Custom shader effects
+    // Custom shader effects and cinematic effects (directional_blur, grain)
     engine.register_fn(
         "apply_effect",
         |node: &mut NodeHandle, name: &str, map: rhai::Map| -> NodeHandle {
             let mut d = node.director.lock().unwrap();
-            if name == "shader" {
-                if let Some(code) = map.get("code").and_then(|v| v.clone().into_string().ok()) {
-                    let mut uniforms = HashMap::new();
-                    if let Some(u_map) = map
-                        .get("uniforms")
-                        .and_then(|v| v.clone().try_cast::<Map>())
-                    {
-                        for (k, v) in u_map {
-                            if let Ok(f) = v.as_float() {
-                                uniforms.insert(
-                                    k.to_string(),
-                                    ShaderUniform::Float(Animated::new(f as f32)),
-                                );
-                            } else if let Ok(arr) = v.clone().into_array() {
-                                // Handle array -> Vec<f32>
-                                let mut vec_data = Vec::new();
-                                for item in arr {
-                                    if let Ok(f) = item.as_float() {
-                                        vec_data.push(f as f32);
-                                    }
-                                }
-                                if !vec_data.is_empty() {
+
+            let effect = match name {
+                "shader" => {
+                    if let Some(code) = map.get("code").and_then(|v| v.clone().into_string().ok()) {
+                        let mut uniforms = HashMap::new();
+                        if let Some(u_map) = map
+                            .get("uniforms")
+                            .and_then(|v| v.clone().try_cast::<Map>())
+                        {
+                            for (k, v) in u_map {
+                                if let Ok(f) = v.as_float() {
                                     uniforms.insert(
                                         k.to_string(),
-                                        ShaderUniform::Vec(Animated::new(TweenableVector(
-                                            vec_data,
-                                        ))),
+                                        ShaderUniform::Float(Animated::new(f as f32)),
                                     );
+                                } else if let Ok(arr) = v.clone().into_array() {
+                                    // Handle array -> Vec<f32>
+                                    let mut vec_data = Vec::new();
+                                    for item in arr {
+                                        if let Ok(f) = item.as_float() {
+                                            vec_data.push(f as f32);
+                                        }
+                                    }
+                                    if !vec_data.is_empty() {
+                                        uniforms.insert(
+                                            k.to_string(),
+                                            ShaderUniform::Vec(Animated::new(TweenableVector(
+                                                vec_data,
+                                            ))),
+                                        );
+                                    }
                                 }
                             }
                         }
+                        Some(EffectType::RuntimeShader {
+                            sksl: code,
+                            uniforms,
+                        })
+                    } else {
+                        None
                     }
-
-                    let effect = EffectType::RuntimeShader {
-                        sksl: code,
-                        uniforms,
-                    };
-                    let id = apply_effect_to_node(&mut d, node.id, effect);
-                    return NodeHandle {
-                        director: node.director.clone(),
-                        id,
-                    };
                 }
-            }
-            NodeHandle {
-                director: node.director.clone(),
-                id: node.id,
+                // Directional blur (motion blur)
+                // Usage: node.apply_effect("directional_blur", #{ strength: 10.0, angle: 45.0, samples: 16 })
+                "directional_blur" | "motion_blur" => {
+                    let strength = map
+                        .get("strength")
+                        .and_then(|v| v.as_float().ok())
+                        .unwrap_or(10.0) as f32;
+                    let angle = map
+                        .get("angle")
+                        .and_then(|v| v.as_float().ok())
+                        .unwrap_or(0.0) as f32;
+                    let samples = map
+                        .get("samples")
+                        .and_then(|v| v.as_int().ok())
+                        .unwrap_or(16) as u32;
+                    Some(EffectType::DirectionalBlur {
+                        strength: Animated::new(strength),
+                        angle: Animated::new(angle),
+                        samples,
+                    })
+                }
+                // Film grain effect
+                // Usage: node.apply_effect("grain", #{ intensity: 0.1, size: 2.0 })
+                "grain" | "film_grain" | "noise" => {
+                    let intensity = map
+                        .get("intensity")
+                        .and_then(|v| v.as_float().ok())
+                        .unwrap_or(0.1) as f32;
+                    let size = map
+                        .get("size")
+                        .and_then(|v| v.as_float().ok())
+                        .unwrap_or(2.0) as f32;
+                    Some(EffectType::FilmGrain {
+                        intensity: Animated::new(intensity),
+                        size: Animated::new(size),
+                    })
+                }
+                _ => None,
+            };
+
+            if let Some(eff) = effect {
+                let id = apply_effect_to_node(&mut d, node.id, eff);
+                NodeHandle {
+                    director: node.director.clone(),
+                    id,
+                }
+            } else {
+                NodeHandle {
+                    director: node.director.clone(),
+                    id: node.id,
+                }
             }
         },
     );

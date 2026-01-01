@@ -1,11 +1,11 @@
 use crate::animation::{Animated, TweenableVector};
 use crate::element::Element;
+use crate::errors::RenderError;
 use crate::node::parse_easing;
 use crate::types::Color;
-use crate::errors::RenderError;
 use skia_safe::{
-    color_filters, image_filters, runtime_effect::RuntimeShaderBuilder, Canvas, ColorMatrix,
-    Paint, Rect, RuntimeEffect, TileMode,
+    color_filters, image_filters, runtime_effect::RuntimeShaderBuilder, Canvas, ColorMatrix, Paint,
+    Rect, RuntimeEffect, TileMode,
 };
 use std::any::Any;
 use std::collections::HashMap;
@@ -49,6 +49,22 @@ pub enum EffectType {
         offset_y: Animated<f32>,
         color: Animated<Color>,
     },
+    /// Directional blur (motion blur) along an angle.
+    DirectionalBlur {
+        /// Blur strength (pixel distance)
+        strength: Animated<f32>,
+        /// Direction angle in degrees (0 = right, 90 = down)
+        angle: Animated<f32>,
+        /// Number of samples (quality vs performance, clamped 4-64)
+        samples: u32,
+    },
+    /// Film grain / noise overlay for cinematic look.
+    FilmGrain {
+        /// Grain intensity (0.0 - 1.0)
+        intensity: Animated<f32>,
+        /// Grain size/scale (pixels)
+        size: Animated<f32>,
+    },
 }
 
 impl EffectType {
@@ -71,6 +87,16 @@ impl EffectType {
                 offset_x.update(time);
                 offset_y.update(time);
                 color.update(time);
+            }
+            EffectType::DirectionalBlur {
+                strength, angle, ..
+            } => {
+                strength.update(time);
+                angle.update(time);
+            }
+            EffectType::FilmGrain { intensity, size } => {
+                intensity.update(time);
+                size.update(time);
             }
         }
     }
@@ -156,6 +182,108 @@ pub fn build_effect_filter(
                             }
                         }
                         // "image" is the standard name for the input texture in SkSL for ImageFilters
+                        current_filter =
+                            image_filters::runtime_shader(&builder, "image", current_filter);
+                    }
+                }
+            }
+            EffectType::DirectionalBlur {
+                strength,
+                angle,
+                samples: _,
+            } => {
+                // Use fixed 16 samples for simplicity and compatibility
+                // (SkSL has restrictions on dynamic loop bounds)
+                let sksl = r#"
+uniform shader image;
+uniform float2 u_resolution;
+uniform float u_strength;
+uniform float u_angle;
+
+half4 main(float2 pos) {
+    float rad = radians(u_angle);
+    float2 dir = float2(cos(rad), sin(rad));
+    
+    half4 color = half4(0.0);
+    // Fixed 16 samples for motion blur
+    for (int i = 0; i < 16; i++) {
+        float t = (float(i) - 7.5) / 8.0;  // Range: -0.9375 to +0.9375
+        float2 offset = dir * u_strength * t;
+        color += image.eval(pos + offset);
+    }
+    return color / 16.0;
+}
+"#;
+                if let Some(cache_arc) = shader_cache {
+                    let cache_key = "__directional_blur__".to_string();
+                    let mut cache = cache_arc.lock().unwrap();
+                    if !cache.contains_key(&cache_key) {
+                        match RuntimeEffect::make_for_shader(sksl, None) {
+                            Ok(effect) => {
+                                cache.insert(cache_key.clone(), effect);
+                            }
+                            Err(e) => {
+                                error!("DirectionalBlur shader compilation error: {}", e);
+                                continue;
+                            }
+                        }
+                    }
+                    if let Some(effect) = cache.get(&cache_key) {
+                        let mut builder = RuntimeShaderBuilder::new(effect.clone());
+                        let _ = builder
+                            .set_uniform_float("u_resolution", &[resolution.0, resolution.1]);
+                        let _ = builder.set_uniform_float("u_strength", &[strength.current_value]);
+                        let _ = builder.set_uniform_float("u_angle", &[angle.current_value]);
+                        current_filter =
+                            image_filters::runtime_shader(&builder, "image", current_filter);
+                    }
+                }
+            }
+            EffectType::FilmGrain { intensity, size } => {
+                let sksl = r#"
+uniform shader image;
+uniform float2 u_resolution;
+uniform float u_time;
+uniform float u_intensity;
+uniform float u_size;
+
+float hash(float2 p) {
+    return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
+}
+
+half4 main(float2 pos) {
+    half4 color = image.eval(pos);
+    
+    // Animated grain based on time and position
+    float2 grain_pos = floor(pos / u_size) + floor(u_time * 24.0);
+    float grain = hash(grain_pos) * 2.0 - 1.0;
+    
+    color.rgb += half3(grain * u_intensity);
+    return color;
+}
+"#;
+                if let Some(cache_arc) = shader_cache {
+                    let cache_key = "__film_grain__".to_string();
+                    let mut cache = cache_arc.lock().unwrap();
+                    if !cache.contains_key(&cache_key) {
+                        match RuntimeEffect::make_for_shader(sksl, None) {
+                            Ok(effect) => {
+                                cache.insert(cache_key.clone(), effect);
+                            }
+                            Err(e) => {
+                                error!("FilmGrain shader compilation error: {}", e);
+                                continue;
+                            }
+                        }
+                    }
+                    if let Some(effect) = cache.get(&cache_key) {
+                        let mut builder = RuntimeShaderBuilder::new(effect.clone());
+                        let _ = builder
+                            .set_uniform_float("u_resolution", &[resolution.0, resolution.1]);
+                        let _ = builder.set_uniform_float("u_time", &[time]);
+                        let _ =
+                            builder.set_uniform_float("u_intensity", &[intensity.current_value]);
+                        let _ = builder.set_uniform_float("u_size", &[size.current_value]);
                         current_filter =
                             image_filters::runtime_shader(&builder, "image", current_filter);
                     }
