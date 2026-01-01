@@ -29,7 +29,10 @@ Use this map to locate the correct file for a specific task.
 | **Rendering** | `systems/renderer.rs` | `render_recursive`, `render_export` |
 | **Layout** | `systems/layout.rs` | `LayoutEngine`, Taffy integration |
 | **Assets** | `systems/assets.rs` | `AssetManager`, fonts, shaders |
-| **Scripting** | `scripting.rs` | Rhai engine, all API bindings |
+| **Scripting** | `scripting/mod.rs` | Rhai engine, `register_rhai_api` |
+| **Scripting Types** | `scripting/types.rs` | `MovieHandle`, `SceneHandle`, `NodeHandle` |
+| **Scripting Utils** | `scripting/utils.rs` | Parsers (`parse_easing`, `parse_layout_style`) |
+| **Scripting API** | `scripting/api/*.rs` | Lifecycle, nodes, animation, audio, effects, properties |
 | **Animation** | `animation.rs` | `Animated`, `EasingType`, springs |
 | **Audio** | `audio.rs` | `AudioMixer`, `AudioTrack` |
 | **Video Encoding** | `video_wrapper.rs` | FFMPEG/video-rs wrapper |
@@ -79,7 +82,18 @@ crates/
 │   ├── src/
 │   │   ├── director.rs      # Timeline coordinator
 │   │   ├── scene.rs         # Scene graph (arena storage)
-│   │   ├── scripting.rs     # Rhai API bindings
+│   │   ├── scripting/       # Rhai API bindings (modular)
+│   │   │   ├── mod.rs       # Entry point, register_rhai_api()
+│   │   │   ├── types.rs     # Movie/Scene/Node/AudioTrack handles
+│   │   │   ├── utils.rs     # Parsers (easing, layout, colors)
+│   │   │   ├── theme.rs     # Design system tokens API
+│   │   │   └── api/         # Domain-specific registrations
+│   │   │       ├── lifecycle.rs  # Director/scene management
+│   │   │       ├── nodes.rs      # add_box, add_text, add_image, etc.
+│   │   │       ├── animation.rs  # animate, spring, path_animate
+│   │   │       ├── audio.rs      # add_audio, FFT analysis
+│   │   │       ├── effects.rs    # apply_effect, shaders
+│   │   │       └── properties.rs # set_style, set_mask, set_pivot
 │   │   ├── animation.rs     # Keyframe/spring animation
 │   │   ├── node/            # Node implementations
 │   │   └── systems/         # Renderer, Layout, Assets
@@ -121,15 +135,22 @@ crates/
 ## Common Tasks
 
 ### Add a Rhai API
-1. Edit `crates/director-core/src/scripting.rs`
-2. Use `engine.register_fn("name", |...| { ... })`
-3. Update `docs/SCRIPTING.md`
+1. Identify the appropriate sub-module in `crates/director-core/src/scripting/api/`:
+   - `lifecycle.rs` - Director/scene management
+   - `nodes.rs` - Node creation functions
+   - `animation.rs` - Animation functions
+   - `audio.rs` - Audio functions
+   - `effects.rs` - Visual effects
+   - `properties.rs` - Node property setters
+2. Add `engine.register_fn("name", |...| { ... })` in the appropriate module
+3. If adding a new utility parser, add it to `scripting/utils.rs`
+4. Update `docs/SCRIPTING.md`
 
 ### Add a Node Type
 1. Create `crates/director-core/src/node/my_node.rs`
 2. Implement `Element` trait
 3. Add to `node/mod.rs`
-4. Add Rhai binding in `scripting.rs`
+4. Add Rhai binding in `scripting/api/nodes.rs`
 5. **Update the Codebase Map** (Node Types table)
 
 ### Run Tests
