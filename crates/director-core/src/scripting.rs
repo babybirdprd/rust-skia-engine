@@ -993,6 +993,51 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         }
     });
 
+    engine.register_fn("add_image", |scene: &mut SceneHandle, path: &str| {
+        let mut d = scene.director.lock().unwrap();
+        let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
+
+        let img_node = ImageNode::new(bytes);
+        let id = d.scene.add_node(Box::new(img_node));
+        d.scene.add_child(scene.root_id, id);
+        NodeHandle {
+            director: scene.director.clone(),
+            id,
+        }
+    });
+
+    engine.register_fn(
+        "add_image",
+        |scene: &mut SceneHandle, path: &str, props: rhai::Map| {
+            let mut d = scene.director.lock().unwrap();
+            let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
+
+            let mut img_node = ImageNode::new(bytes);
+            parse_layout_style(&props, &mut img_node.style);
+
+            if let Some(fit_str) = props
+                .get("object_fit")
+                .and_then(|v| v.clone().into_string().ok())
+            {
+                if let Some(fit) = parse_object_fit(&fit_str) {
+                    img_node.object_fit = fit;
+                }
+            }
+
+            let id = d.scene.add_node(Box::new(img_node));
+            if let Some(z) = props.get("z_index").and_then(|v| v.as_int().ok()) {
+                if let Some(n) = d.scene.get_node_mut(id) {
+                    n.z_index = z as i32;
+                }
+            }
+            d.scene.add_child(scene.root_id, id);
+            NodeHandle {
+                director: scene.director.clone(),
+                id,
+            }
+        },
+    );
+
     engine.register_fn(
         "add_lottie",
         |parent: &mut NodeHandle, path: &str| -> Result<NodeHandle, Box<rhai::EvalAltResult>> {
@@ -1070,6 +1115,90 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
                     d.scene.add_child(parent.id, id);
                     Ok(NodeHandle {
                         director: parent.director.clone(),
+                        id,
+                    })
+                }
+                Err(e) => Err(format!("Failed to parse lottie: {}", e).into()),
+            }
+        },
+    );
+
+    engine.register_fn(
+        "add_lottie",
+        |scene: &mut SceneHandle, path: &str| -> Result<NodeHandle, Box<rhai::EvalAltResult>> {
+            let mut d = scene.director.lock().unwrap();
+            let bytes = d
+                .assets
+                .loader
+                .load_bytes(path)
+                .map_err(|e| e.to_string())?;
+
+            match LottieNode::new(&bytes, HashMap::new(), &d.assets) {
+                Ok(lottie_node) => {
+                    let id = d.scene.add_node(Box::new(lottie_node));
+                    d.scene.add_child(scene.root_id, id);
+                    Ok(NodeHandle {
+                        director: scene.director.clone(),
+                        id,
+                    })
+                }
+                Err(e) => Err(format!("Failed to parse lottie: {}", e).into()),
+            }
+        },
+    );
+
+    engine.register_fn(
+        "add_lottie",
+        |scene: &mut SceneHandle,
+         path: &str,
+         props: rhai::Map|
+         -> Result<NodeHandle, Box<rhai::EvalAltResult>> {
+            let mut d = scene.director.lock().unwrap();
+            let bytes = d
+                .assets
+                .loader
+                .load_bytes(path)
+                .map_err(|e| e.to_string())?;
+
+            let mut assets_map = HashMap::new();
+            if let Some(assets_prop) = props
+                .get("assets")
+                .and_then(|v| v.clone().try_cast::<Map>())
+            {
+                for (key, val) in assets_prop {
+                    if let Ok(asset_path) = val.into_string() {
+                        let asset_bytes = d
+                            .assets
+                            .loader
+                            .load_bytes(&asset_path)
+                            .unwrap_or(Vec::new());
+                        let data = skia_safe::Data::new_copy(&asset_bytes);
+                        if let Some(image) = skia_safe::Image::from_encoded(data) {
+                            assets_map.insert(key.to_string(), image);
+                        }
+                    }
+                }
+            }
+
+            match LottieNode::new(&bytes, assets_map, &d.assets) {
+                Ok(mut lottie_node) => {
+                    parse_layout_style(&props, &mut lottie_node.style);
+                    if let Some(v) = props.get("speed").and_then(|v| v.as_float().ok()) {
+                        lottie_node.speed = v as f32;
+                    }
+                    if let Some(v) = props.get("loop").and_then(|v| v.as_bool().ok()) {
+                        lottie_node.loop_anim = v;
+                    }
+
+                    let id = d.scene.add_node(Box::new(lottie_node));
+                    if let Some(z) = props.get("z_index").and_then(|v| v.as_int().ok()) {
+                        if let Some(n) = d.scene.get_node_mut(id) {
+                            n.z_index = z as i32;
+                        }
+                    }
+                    d.scene.add_child(scene.root_id, id);
+                    Ok(NodeHandle {
+                        director: scene.director.clone(),
                         id,
                     })
                 }
@@ -1238,6 +1367,67 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
             d.scene.add_child(parent.id, id);
             NodeHandle {
                 director: parent.director.clone(),
+                id,
+            }
+        },
+    );
+
+    engine.register_fn("add_video", |scene: &mut SceneHandle, path: &str| {
+        let mut d = scene.director.lock().unwrap();
+        let mode = d.render_mode;
+        let p = std::path::Path::new(path);
+
+        let source = if p.exists() && p.is_file() {
+            VideoSource::Path(p.to_path_buf())
+        } else {
+            let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
+            VideoSource::Bytes(bytes)
+        };
+
+        let vid_node = VideoNode::new(source, mode);
+        let id = d.scene.add_node(Box::new(vid_node));
+        d.scene.add_child(scene.root_id, id);
+        NodeHandle {
+            director: scene.director.clone(),
+            id,
+        }
+    });
+
+    engine.register_fn(
+        "add_video",
+        |scene: &mut SceneHandle, path: &str, props: rhai::Map| {
+            let mut d = scene.director.lock().unwrap();
+            let mode = d.render_mode;
+            let p = std::path::Path::new(path);
+
+            let source = if p.exists() && p.is_file() {
+                VideoSource::Path(p.to_path_buf())
+            } else {
+                let bytes = d.assets.loader.load_bytes(path).unwrap_or(Vec::new());
+                VideoSource::Bytes(bytes)
+            };
+
+            let mut vid_node = VideoNode::new(source, mode);
+            parse_layout_style(&props, &mut vid_node.style);
+
+            if let Some(fit_str) = props
+                .get("object_fit")
+                .and_then(|v| v.clone().into_string().ok())
+            {
+                if let Some(fit) = parse_object_fit(&fit_str) {
+                    vid_node.object_fit = fit;
+                }
+            }
+
+            let id = d.scene.add_node(Box::new(vid_node));
+            if let Some(z) = props.get("z_index").and_then(|v| v.as_int().ok()) {
+                if let Some(n) = d.scene.get_node_mut(id) {
+                    n.z_index = z as i32;
+                }
+            }
+            d.scene.add_child(scene.root_id, id);
+            NodeHandle {
+                director: scene.director.clone(),
                 id,
             }
         },
@@ -1668,9 +1858,111 @@ pub fn register_rhai_api(engine: &mut Engine, loader: Arc<dyn AssetLoader>) {
         },
     );
 
+    // Integer Overload for add_animator
+    engine.register_fn(
+        "add_animator",
+        |node: &mut NodeHandle,
+         start_idx: i64,
+         end_idx: i64,
+         prop: &str,
+         start: i64,
+         end: i64,
+         dur: f64,
+         ease: &str| {
+            let mut d = node.director.lock().unwrap();
+            if let Some(n) = d.scene.get_node_mut(node.id) {
+                n.element.add_text_animator(
+                    start_idx as usize,
+                    end_idx as usize,
+                    prop.to_string(),
+                    start as f32,
+                    end as f32,
+                    dur,
+                    ease,
+                );
+            }
+        },
+    );
+
     engine.register_fn(
         "animate",
         |node: &mut NodeHandle, prop: &str, start: f64, end: f64, dur: f64, ease: &str| {
+            let mut d = node.director.lock().unwrap();
+            if let Some(n) = d.scene.get_node_mut(node.id) {
+                let ease_fn = match ease {
+                    "linear" => EasingType::Linear,
+                    "ease_in" => EasingType::EaseIn,
+                    "ease_out" => EasingType::EaseOut,
+                    "ease_in_out" => EasingType::EaseInOut,
+                    "bounce_out" => EasingType::BounceOut,
+                    "bounce_in" => EasingType::BounceIn,
+                    "bounce_in_out" => EasingType::BounceInOut,
+                    "elastic_out" => EasingType::ElasticOut,
+                    "elastic_in" => EasingType::ElasticIn,
+                    "elastic_in_out" => EasingType::ElasticInOut,
+                    "back_out" => EasingType::BackOut,
+                    "back_in" => EasingType::BackIn,
+                    "back_in_out" => EasingType::BackInOut,
+                    _ => EasingType::Linear,
+                };
+
+                match prop {
+                    "scale" => {
+                        n.transform
+                            .scale_x
+                            .add_segment(start as f32, end as f32, dur, ease_fn);
+                        n.transform
+                            .scale_y
+                            .add_segment(start as f32, end as f32, dur, ease_fn);
+                    }
+                    "scale_x" => {
+                        n.transform
+                            .scale_x
+                            .add_segment(start as f32, end as f32, dur, ease_fn)
+                    }
+                    "scale_y" => {
+                        n.transform
+                            .scale_y
+                            .add_segment(start as f32, end as f32, dur, ease_fn)
+                    }
+                    "rotation" => {
+                        n.transform
+                            .rotation
+                            .add_segment(start as f32, end as f32, dur, ease_fn)
+                    }
+                    "skew_x" => {
+                        n.transform
+                            .skew_x
+                            .add_segment(start as f32, end as f32, dur, ease_fn)
+                    }
+                    "skew_y" => {
+                        n.transform
+                            .skew_y
+                            .add_segment(start as f32, end as f32, dur, ease_fn)
+                    }
+                    "translate_x" | "x" => {
+                        n.transform
+                            .translate_x
+                            .add_segment(start as f32, end as f32, dur, ease_fn)
+                    }
+                    "translate_y" | "y" => {
+                        n.transform
+                            .translate_y
+                            .add_segment(start as f32, end as f32, dur, ease_fn)
+                    }
+                    _ => {
+                        n.element
+                            .animate_property(prop, start as f32, end as f32, dur, ease);
+                    }
+                }
+            }
+        },
+    );
+
+    // Integer Overload for animate
+    engine.register_fn(
+        "animate",
+        |node: &mut NodeHandle, prop: &str, start: i64, end: i64, dur: f64, ease: &str| {
             let mut d = node.director.lock().unwrap();
             if let Some(n) = d.scene.get_node_mut(node.id) {
                 let ease_fn = match ease {
