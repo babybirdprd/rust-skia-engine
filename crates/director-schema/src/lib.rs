@@ -52,6 +52,9 @@ pub struct Scene {
     /// Transition to the next scene (optional)
     #[serde(default)]
     pub transition: Option<TransitionConfig>,
+    /// Audio tracks specific to this scene
+    #[serde(default)]
+    pub audio_tracks: Vec<AudioTrack>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -344,7 +347,10 @@ pub struct Animation {
     pub end: f32,
     pub duration: f64,
     pub start_time: f64, // Relative to scene start
+    #[serde(default = "default_easing")]
     pub easing: EasingType,
+    /// Spring configuration (overrides easing/duration if present)
+    pub spring: Option<SpringConfig>,
 }
 
 /// Per-glyph animator for kinetic typography effects.
@@ -384,6 +390,12 @@ pub struct AudioTrack {
     /// Whether to loop the audio
     #[serde(default)]
     pub loop_audio: bool,
+    /// Duration of fade-in in seconds
+    #[serde(default)]
+    pub fade_in_duration: f64,
+    /// Duration of fade-out in seconds
+    #[serde(default)]
+    pub fade_out_duration: f64,
 }
 
 fn default_volume() -> f32 {
@@ -425,6 +437,7 @@ mod tests {
                 id: "scene_1".to_string(),
                 duration_secs: 5.0,
                 background: Some(Color::BLACK),
+                audio_tracks: vec![],
                 root: Node {
                     id: "root".to_string(),
                     kind: NodeKind::Box { border_radius: 0.0 },
@@ -557,6 +570,7 @@ mod tests {
                     id: "inner_scene".to_string(),
                     duration_secs: 2.0,
                     background: Some(Color::BLACK),
+                    audio_tracks: vec![],
                     root: Node {
                         id: "inner_root".to_string(),
                         kind: NodeKind::Box {

@@ -45,6 +45,51 @@ pub fn load_movie(request: MovieRequest, loader: Arc<dyn AssetLoader>) -> Direct
         cumulative_time += scene_data.duration_secs;
         scene_end_times.push(start_time + scene_data.duration_secs);
 
+        // Load scene audio tracks
+        let mut audio_indices = Vec::new();
+        for track in &scene_data.audio_tracks {
+            let bytes = director
+                .assets
+                .loader
+                .load_bytes(&track.src)
+                .unwrap_or(Vec::new());
+            let samples =
+                director_core::audio::load_audio_bytes(&bytes, director.audio_mixer.sample_rate)
+                    .unwrap_or_else(|e| {
+                        eprintln!("Audio error: {}", e);
+                        Vec::new()
+                    });
+
+            let track_idx = director.add_scene_audio(
+                samples,
+                track.start_time, // Relative to scene
+                scene_data.duration_secs,
+            );
+
+            // Apply volume
+            if let Some(t) = director.audio_mixer.get_track_mut(track_idx) {
+                // Apply base volume
+                t.volume = Animated::new(track.volume);
+
+                // Apply Fade In
+                if track.fade_in_duration > 0.0 {
+                    t.volume.add_segment(0.0, track.volume, track.fade_in_duration, EasingType::Linear);
+                }
+
+                // Apply Fade Out
+                if track.fade_out_duration > 0.0 {
+                    // This is complex because we need to know when to start fading out
+                    // Scene duration - fade out duration
+                    let fade_start = scene_data.duration_secs - track.fade_out_duration;
+                    if fade_start > 0.0 {
+                        t.volume.add_segment(track.volume, 0.0, track.fade_out_duration, EasingType::Linear);
+                    }
+                }
+            }
+
+            audio_indices.push(track_idx);
+        }
+
         // Add to timeline
         director
             .timeline
@@ -53,7 +98,7 @@ pub fn load_movie(request: MovieRequest, loader: Arc<dyn AssetLoader>) -> Direct
                 start_time,
                 duration: scene_data.duration_secs,
                 z_index: 0,
-                audio_tracks: vec![],
+                audio_tracks: audio_indices,
             });
     }
 
@@ -331,17 +376,28 @@ fn build_node_recursive(director: &mut Director, node_def: &Node) -> NodeId {
 
 fn apply_animations(element: &mut Box<dyn Element>, animations: &[Animation]) {
     for anim in animations {
-        let easing_str = easing_to_str(&anim.easing);
+        // If spring config is present, use spring animation
+        if let Some(spring) = &anim.spring {
+            // "The Element trait includes animate_property_spring..."
+            element.animate_property_spring(
+                &anim.property,
+                anim.start,
+                anim.end,
+                *spring,
+            );
+        } else {
+            // Fallback to keyframe animation
+            let easing_str = easing_to_str(&anim.easing);
+            let start_val = anim.start.unwrap_or(0.0); // Fallback if start not provided
 
-        let start_val = anim.start.unwrap_or(0.0); // Fallback if start not provided
-
-        element.animate_property(
-            &anim.property,
-            start_val,
-            anim.end,
-            anim.duration,
-            easing_str,
-        );
+            element.animate_property(
+                &anim.property,
+                start_val,
+                anim.end,
+                anim.duration,
+                easing_str,
+            );
+        }
     }
 }
 
