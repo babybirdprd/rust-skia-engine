@@ -8,7 +8,7 @@ members = [
     "crates/lottie-core",
     "crates/lottie-data",
     "crates/lottie-skia"
-]
+, "crates/director-tts"]
 
 [workspace.package]
 version = "0.1.0"
